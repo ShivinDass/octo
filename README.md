@@ -27,6 +27,30 @@ Octo uses a modular attention structure in its transformer backbone, allowing it
 to robot setups with new sensory inputs, action spaces, and morphologies, using only a small target domain
 dataset and accessible compute budgets.
 
+## Alternate Installation Instructions
+Mostly following Erik Bauer's install [guide](https://github.com/erikbr01/octo_experiments/tree/main?tab=readme-ov-file).
+```bash
+conda create -n octo python=3.10
+conda activate octo
+python -m pip install tensorflow[and-cuda]==2.14.0
+python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+
+conda install -c conda-forge install cudnn=8.8 cuda-version=11.8
+pip install --upgrade "jax[cuda11_pip]==0.4.20" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+```
+
+Verify GPU support in JAX is working:
+```
+from jax.lib import xla_bridge
+print(xla_bridge.get_backend().platform)
+```
+
+
+Then install other requirements,
+```
+pip install -e .
+pip install -r requirements.txt
+```
 
 ## Installation
 ```bash

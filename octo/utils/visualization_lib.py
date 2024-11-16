@@ -27,6 +27,17 @@ from octo.utils.gym_wrappers import (
     TemporalEnsembleWrapper,
 )
 
+import cv2
+def write_video(video_frames, filename, fps=10):
+    '''
+    video_frames: list of frames (T, C, H, W)
+    '''
+
+    import imageio
+    # for i in range(len(video_frames)):
+    #     video_frames[i] = cv2.cvtColor(video_frames[i], cv2.COLOR_RGB2BGR)
+    imageio.mimwrite(filename, video_frames, fps=fps)
+
 BASE_METRIC_KEYS = {
     "mse": ("mse", tuple()),  # What is the MSE
     ####
