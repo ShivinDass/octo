@@ -33,9 +33,10 @@ Mostly following Erik Bauer's install [guide](https://github.com/erikbr01/octo_e
 conda create -n octo python=3.10
 conda activate octo
 python -m pip install tensorflow[and-cuda]==2.14.0
+pip install numpy==1.24.3
 python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
 
-conda install -c conda-forge install cudnn=8.8 cuda-version=11.8
+conda install -c conda-forge cudnn=8.8 cuda-version=11.8
 pip install --upgrade "jax[cuda11_pip]==0.4.20" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 ```
 
