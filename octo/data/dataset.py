@@ -362,6 +362,8 @@ def make_dataset_from_rlds(
         return traj
 
     builder = tfds.builder(name, data_dir=data_dir)
+    # shivin: use the followin when using downloaded datasets, otherwise tfds throws an error
+    # builder = tfds.builder(f"{name}:0.1.0", data_dir=data_dir)
 
     # load or compute dataset statistics
     if isinstance(dataset_statistics, str):

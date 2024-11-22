@@ -27,8 +27,103 @@ Octo uses a modular attention structure in its transformer backbone, allowing it
 to robot setups with new sensory inputs, action spaces, and morphologies, using only a small target domain
 dataset and accessible compute budgets.
 
+## Installation with SIMPLER
+First clone octo and simpler and checkout the correct branches,
+```bash
+cd ~/path/to/dir/
+git clone https://github.com/simpler-env/SimplerEnv
+git clone git@github.com:ShivinDass/octo.gi
 
-## Installation
+cd ~/path/to/dir/SimplerEnv
+git checkout maniskill3
+
+cd ~/path/to/dir/octo
+git checkout 653c54acde686fde619855f2eac0dd6edad7116b # using octo-1.0 (currently testing if octo-1.5 works)
+```
+
+Now install simpler and octo,
+```bash
+conda create -n octo_simpler python=3.10.12
+conda activate octo_simpler
+cd ~/path/to/dir/SimplerEnv
+pip install --upgrade git+https://github.com/haosulab/ManiSkill.git
+pip install torch==2.3.1 tyro==0.8.5
+pip install -e .
+
+pip install tensorflow==2.15.0
+pip install -r requirements_full_install.txt
+pip install tensorflow[and-cuda]==2.15.1 # tensorflow gpu support
+
+# verify gpu support on tensorflow is working
+python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+
+
+conda install -c conda-forge cudnn=8.8 cuda-version=11.8
+pip install --upgrade "jax[cuda11_pip]==0.4.20" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+
+cd ~/path/to/dir/octo
+pip install -e .
+
+# verify GPU support in JAX is working
+from jax.lib import xla_bridge
+print(xla_bridge.get_backend().platform)
+```
+
+### Hacky stuff
+Going through the above process, some packages do not have the correct version for training so change them,
+```bash
+pip install --upgrade typing_extensions
+pip install optax==0.1.5 flax==0.7.5 chex==0.1.85
+
+# in my env, running the above commands also changes jax version to 0.4.35 so install 0.4.20 version again
+pip install --upgrade "jax[cuda11_pip]==0.4.20" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+```
+
+### Verify the installation
+Verify Octo installation,
+```bash
+cd ~/path/to/dir/octo
+python scripts/finetune.py --config.pretrained_path=hf://rail-berkeley/octo-small
+```
+If it starts training, you're good.
+
+Verify if simpler eval works,
+```bash
+cd ~/path/to/dir/SimplerEnv
+XLA_PYTHON_CLIENT_PREALLOCATE=false python real2sim_eval_maniskill3.py --model="octo-small" -e "PutEggplantInBasketScene-v1" -s 0 --num-episodes 10 --num-envs 10
+```
+Wait for the code to finish eval -- it may take a minute or two.
+
+
+## Alternate Installation Instructions (Old)
+Mostly following Erik Bauer's install [guide](https://github.com/erikbr01/octo_experiments/tree/main?tab=readme-ov-file).
+```bash
+conda create -n octo python=3.10
+conda activate octo
+python -m pip install tensorflow[and-cuda]==2.14.0
+pip install numpy==1.24.3
+python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+
+conda install -c conda-forge cudnn=8.8 cuda-version=11.8
+pip install --upgrade "jax[cuda11_pip]==0.4.20" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+```
+
+Verify GPU support in JAX is working:
+```
+from jax.lib import xla_bridge
+print(xla_bridge.get_backend().platform)
+```
+
+
+Then install other requirements,
+```
+pip install -e .
+pip install -r requirements.txt
+```
+
+
+
+## Installation (Old)
 ```bash
 conda create -n octo python=3.10
 conda activate octo
