@@ -32,7 +32,7 @@ First clone octo and simpler and checkout the correct branches,
 ```bash
 cd ~/path/to/dir/
 git clone https://github.com/simpler-env/SimplerEnv
-git clone git@github.com:ShivinDass/octo.gi
+git clone git@github.com:ShivinDass/octo.git
 
 cd ~/path/to/dir/SimplerEnv
 git checkout maniskill3
@@ -89,7 +89,7 @@ If it starts training, you're good.
 
 Verify if simpler eval works,
 ```bash
-cd ~/path/to/dir/SimplerEnv
+cd ~/path/to/dir/SimplerEnv/simpler_env
 XLA_PYTHON_CLIENT_PREALLOCATE=false python real2sim_eval_maniskill3.py --model="octo-small" -e "PutEggplantInBasketScene-v1" -s 0 --num-episodes 10 --num-envs 10
 ```
 Wait for the code to finish eval -- it may take a minute or two.
