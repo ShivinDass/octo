@@ -303,6 +303,8 @@ def create_optimizer(
         tx: an Optax optimizer
         lr_callable: Function that takes the current step and returns the learning rate
     """
+    from ipdb import set_trace as bp
+    bp()
     if isinstance(kwargs["learning_rate"], dict):
         lr_callable = create_lr_schedule(**kwargs["learning_rate"])
     else:
@@ -319,6 +321,7 @@ def create_optimizer(
     grad_accumulation_steps = kwargs.pop("grad_accumulation_steps", None)
 
     tx = optax.adamw(mu_dtype=jnp.bfloat16, **kwargs, mask=wd_mask)
+    # tx = optax.adamw(mu_dtype=jnp.float16, **kwargs, mask=wd_mask)
     if grad_accumulation_steps:
         tx = optax.MultiSteps(tx, grad_accumulation_steps)
     if clip_gradient is not None:

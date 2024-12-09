@@ -15,9 +15,26 @@ def get_config(config_string="full,multimodal"):
 
     FINETUNING_KWARGS = {
         "name": "bridge_dataset",
-        "data_dir": "./tests/debug_dataset",
-        "image_obs_keys": {"primary": "image_0", "wrist": None},
+        # "data_dir": "./tests/debug_dataset",
+        # "name": "bridge_dataset",
+        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/traj_data",
+        # "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:bridge_dataset_transform",
+        # "image_obs_keys": {"primary": "image_0", "wrist": None},
+        # "state_obs_keys": ["state", None],
+
+        # "name": "toto",
+        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/traj_data",
+        # "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:toto_dataset_transform",
+        # "image_obs_keys": {"primary": "image", "wrist": None},
+        # "state_obs_keys": ["state", None],
+
+        "name": "cmu_stretch",
+        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/data",
+        "data_dir": "/mnt/xfs/home/alaakh/store/oxe/traj_data",
+        "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:cmu_stretch_dataset_transform",
+        "image_obs_keys": {"primary": "image", "wrist": None},
         "state_obs_keys": ["state", None],
+
         "language_key": "language_instruction",
         "action_proprio_normalization_type": "normal",
         # All actions are relative deltas, except for the last one (gripper) which is absolute
@@ -25,7 +42,6 @@ def get_config(config_string="full,multimodal"):
         "absolute_action_mask": [False, False, False, False, False, False, True],
         # standardize_fn is dynamically loaded from a file
         # for example: "experiments/kevin/custom_standardization_transforms.py:aloha_dataset_transform"
-        "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:bridge_dataset_transform",
         # If the default data loading speed is too slow, try these:
         # "num_parallel_reads": 8,  # for reading from disk / GCS
         # "num_parallel_calls": 16,  # for initial dataset construction
@@ -60,7 +76,8 @@ def get_config(config_string="full,multimodal"):
         log_interval=100,
         eval_interval=5000,
         save_interval=5000,
-        save_dir=placeholder(str),
+        # save_dir=placeholder(str),
+        save_dir='/mnt/xfs/home/alaakh/src/octo_dir/octo/exps/debug',
         seed=42,
         wandb=dict(
             project="octo_finetune", group=placeholder(str), entity=placeholder(str)

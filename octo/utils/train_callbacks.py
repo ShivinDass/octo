@@ -39,19 +39,22 @@ def create_validation_dataset(
     return make_single_dataset(
         dataset_kwargs={
             **dataset_kwargs,
-            "num_parallel_reads": 4,
-            "num_parallel_calls": 4,
-            "shuffle": False,
+            # "num_parallel_reads": 4,
+            # "num_parallel_calls": 4,
+            # "shuffle": False,
         },
         traj_transform_kwargs={
             **traj_transform_kwargs,
-            "num_parallel_calls": 4,
+            # "num_parallel_calls": 4,
         },
         frame_transform_kwargs={
             **frame_transform_kwargs,
-            "num_parallel_calls": 16,
+            # "num_parallel_calls": 16,
         },
         train=train,
+        num_parallel_calls=1,
+        num_parallel_reads=1,
+        shuffle=False,
     )
 
 
@@ -178,6 +181,7 @@ class ValidationCallback(Callback):
     num_val_batches: int
     modes_to_evaluate: Sequence[str] = ("text_conditioned", "image_conditioned")
     train: bool = False
+    seed: int = None
 
     def __post_init__(self):
         if self.text_processor is not None:
@@ -194,7 +198,7 @@ class ValidationCallback(Callback):
             )
             val_iterator = (
                 val_dataset.unbatch()
-                .shuffle(self.val_shuffle_buffer_size)
+                .shuffle(self.val_shuffle_buffer_size, seed=self.seed)
                 .repeat()
                 .batch(self.dataset_kwargs["batch_size"])
                 .iterator(prefetch=0)

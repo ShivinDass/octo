@@ -41,6 +41,9 @@ try:
 except ImportError:
     pass
 
+from ipdb import set_trace as bp
+from IPython import embed
+
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("name", "experiment", "Experiment name.")
@@ -173,17 +176,26 @@ def main(_):
         del FLAGS.config["dataset_kwargs"]["standardize_fn"]
         FLAGS.config["dataset_kwargs"]["standardize_fn"] = standardize_fn
 
+    os.environ['TF_DETERMINISTIC_OPS'] = '1'
+    tf.random.set_seed(FLAGS.config.seed)
     dataset = make_single_dataset(
         FLAGS.config.dataset_kwargs,
         traj_transform_kwargs=FLAGS.config.traj_transform_kwargs,
         frame_transform_kwargs=FLAGS.config.frame_transform_kwargs,
         train=True,
+        shuffle=False,
+        num_parallel_calls=1,
+        num_parallel_reads=1,
     )
+    dataset_statistics = dataset.dataset_statistics
+    dataset = dataset.cache()
+    dataset.dataset_statistics = dataset_statistics
     train_data_iter = (
         dataset.repeat()
         .unbatch()
-        .shuffle(FLAGS.config.shuffle_buffer_size)
+        .shuffle(FLAGS.config.shuffle_buffer_size, seed=FLAGS.config.seed)
         .batch(FLAGS.config.batch_size)
+        .prefetch(buffer_size=tf.data.AUTOTUNE)
         .iterator()
     )
     train_data_iter = map(process_batch, train_data_iter)
@@ -213,7 +225,6 @@ def main(_):
     # Setup Optimizer and Train State
     #
     #########
-
     params = model.params
     if FLAGS.config.optimizer.frozen_keys is None:
         FLAGS.config.optimizer.frozen_keys = model.config["optimizer"]["frozen_keys"]
@@ -293,10 +304,13 @@ def main(_):
     # Model is replicated across devices, data is split across devices
     @partial(
         jax.jit,
-        in_shardings=[replicated_sharding, dp_sharding],
+        in_shardings=[replicated_sharding, dp_sharding, replicated_sharding],
     )
-    def train_step(state, batch):
+    def train_step(state, batch, batch_rng):
         rng, dropout_rng = jax.random.split(state.rng)
+        bp()
+        if batch_rng is not None:
+            dropout_rng = batch_rng
         (loss, info), grads = jax.value_and_grad(loss_fn, has_aux=True)(
             state.model.params, batch, dropout_rng, train=True
         )
@@ -341,6 +355,7 @@ def main(_):
         val_dataset_kwargs_list=dataset_kwargs_list,
         dataset_kwargs=FLAGS.config,
         modes_to_evaluate=modes_to_evaluate,
+        seed=FLAGS.config.seed,
         **FLAGS.config.val_kwargs,
     )
 
@@ -390,8 +405,13 @@ def main(_):
         with timer("dataset"):
             batch = next(train_data_iter)
 
+            if 'seed' in batch:
+                batch_rng = jax.random.PRNGKey(batch['seed'][0])
+            else:
+                batch_rng = None
+
         with timer("train"):
-            train_state, update_info = train_step(train_state, batch)
+            train_state, update_info = train_step(train_state, batch, batch_rng)
 
         timer.tock("total")
 
@@ -408,9 +428,9 @@ def main(_):
                 val_metrics = val_callback(train_state, i + 1)
                 wandb_log(val_metrics, step=i)
 
-            with timer("visualize"):
-                viz_metrics = viz_callback(train_state, i + 1)
-                wandb_log(viz_metrics, step=i)
+            # with timer("visualize"):
+            #     viz_metrics = viz_callback(train_state, i + 1)
+            #     wandb_log(viz_metrics, step=i)
 
             if rollout_callback is not None:
                 with timer("rollout"):

@@ -89,7 +89,7 @@ def apply_trajectory_transforms(
         )
 
     # marks which entires of the observation and task dicts are padding
-    dataset = dataset.traj_map(traj_transforms.add_pad_mask_dict, num_parallel_calls)
+    dataset = dataset.traj_map(traj_transforms.add_pad_mask_dict, num_parallel_calls, deterministic=True)
 
     # updates the "task" dict
     if goal_relabeling_strategy is not None:
@@ -99,6 +99,7 @@ def apply_trajectory_transforms(
                 **goal_relabeling_kwargs,
             ),
             num_parallel_calls,
+            deterministic=True,
         )
 
     # must run task augmentation before chunking, in case it changes goal timesteps
@@ -110,6 +111,7 @@ def apply_trajectory_transforms(
                 **task_augment_kwargs,
             ),
             num_parallel_calls,
+            deterministic=True,
         )
 
     # chunks observations and actions, giving them a new axis at index 1 of size `window_size` and
@@ -121,12 +123,14 @@ def apply_trajectory_transforms(
             future_action_window_size=future_action_window_size,
         ),
         num_parallel_calls,
+        deterministic=True,
     )
 
     if train and subsample_length is not None:
         dataset = dataset.traj_map(
             partial(traj_transforms.subsample, subsample_length=subsample_length),
             num_parallel_calls,
+            deterministic=True
         )
 
     return dataset
@@ -181,6 +185,7 @@ def apply_frame_transforms(
             ),
         ),
         num_parallel_calls,
+        deterministic=True,
     )
 
     if train:
@@ -192,7 +197,7 @@ def apply_frame_transforms(
             )
             return apply_obs_transform(aug_fn, frame)
 
-        dataset = dataset.frame_map(aug, num_parallel_calls)
+        dataset = dataset.frame_map(aug, num_parallel_calls, deterministic=True)
 
     return dataset
 
@@ -291,6 +296,10 @@ def make_dataset_from_rlds(
         REQUIRED_KEYS.add(language_key)
 
     def restructure(traj):
+        sample_index = None
+        if "index" in traj:
+            sample_index = traj["index"]
+
         # apply a standardization function, if provided
         if standardize_fn is not None:
             traj = standardize_fn(traj)
@@ -348,6 +357,9 @@ def make_dataset_from_rlds(
             "dataset_name": tf.repeat(name, traj_len),
         }
 
+        if sample_index is not None:
+            traj["index"] = sample_index[:traj_len]
+
         if absolute_action_mask is not None:
             if len(absolute_action_mask) != traj["action"].shape[-1]:
                 raise ValueError(
@@ -401,11 +413,14 @@ def make_dataset_from_rlds(
     else:
         split = "train" if train else "val"
 
+    options = tf.data.Options()
+    options.experimental_deterministic = True
+
     dataset = dl.DLataset.from_rlds(
         builder, split=split, shuffle=shuffle, num_parallel_reads=num_parallel_reads
-    )
+    ).with_options(options)
+    dataset = dataset.traj_map(restructure, num_parallel_calls, deterministic=True)
 
-    dataset = dataset.traj_map(restructure, num_parallel_calls)
     dataset = dataset.traj_map(
         partial(
             normalize_action_and_proprio,
@@ -413,6 +428,7 @@ def make_dataset_from_rlds(
             normalization_type=action_proprio_normalization_type,
         ),
         num_parallel_calls,
+        deterministic=True,
     )
 
     return dataset, dataset_statistics
@@ -424,6 +440,9 @@ def make_single_dataset(
     train: bool,
     traj_transform_kwargs: dict = {},
     frame_transform_kwargs: dict = {},
+    num_parallel_calls: int=-1,
+    num_parallel_reads: int=-1,
+    shuffle: bool = False,
 ) -> dl.DLataset:
     """Creates a single dataset from kwargs. Returns a dataset of trajectories.
 
@@ -436,9 +455,12 @@ def make_single_dataset(
     dataset, dataset_statistics = make_dataset_from_rlds(
         **dataset_kwargs,
         train=train,
+        num_parallel_calls=num_parallel_calls,
+        num_parallel_reads=num_parallel_reads,
+        shuffle=shuffle,
     )
-    dataset = apply_trajectory_transforms(dataset, **traj_transform_kwargs, train=train)
-    dataset = apply_frame_transforms(dataset, **frame_transform_kwargs, train=train)
+    dataset = apply_trajectory_transforms(dataset, **traj_transform_kwargs, train=train, num_parallel_calls=num_parallel_calls)
+    dataset = apply_frame_transforms(dataset, **frame_transform_kwargs, train=train, num_parallel_calls=num_parallel_calls)
 
     # this seems to reduce memory usage without affecting speed
     dataset = dataset.with_ram_budget(1)
@@ -460,6 +482,8 @@ def make_interleaved_dataset(
     balance_weights: bool = False,
     traj_transform_threads: Optional[int] = None,
     traj_read_threads: Optional[int] = None,
+    num_parallel_calls: Optional[int] = tf.data.AUTOTUNE,
+    num_parallel_reads: Optional[int] = tf.data.AUTOTUNE,
 ) -> dl.DLataset:
     """Creates an interleaved dataset from list of dataset kwargs. Returns a dataset of batched frames.
 
@@ -506,8 +530,11 @@ def make_interleaved_dataset(
     pprint_data_mixture(dataset_kwargs_list, sample_weights)
 
     # allocate threads based on weights
-    threads_per_dataset = allocate_threads(traj_transform_threads, sample_weights)
-    reads_per_dataset = allocate_threads(traj_read_threads, sample_weights)
+    # threads_per_dataset = allocate_threads(traj_transform_threads, sample_weights)
+    # reads_per_dataset = allocate_threads(traj_read_threads, sample_weights)
+
+    threads_per_dataset = [num_parallel_calls] * len(dataset_kwargs_list)
+    reads_per_dataset = [num_parallel_reads] * len(dataset_kwargs_list)
 
     logging.info("Threads per dataset: %s", threads_per_dataset)
     logging.info("Reads per dataset: %s", reads_per_dataset)
