@@ -29,6 +29,8 @@ from IPython import embed
 from absl import flags, app
 from ml_collections import config_flags
 
+jax.config.update("jax_disable_jit", True)
+
 import flags_config
 FLAGS = flags.FLAGS
 
@@ -215,7 +217,8 @@ def compute_datamodels_lds():
     sharding, replicated_sharding = make_shardings()
     head_val_batcher = jax.tree_util.Partial(val_batcher, sharding=sharding)
 
-    vjp_skele = jax.tree_util.Partial(partial(example_loss_vjp_skeleton, bs=FLAGS.config.batch_size))
+    # vjp_skele = jax.tree_util.Partial(partial(example_loss_vjp_skeleton, bs=FLAGS.config.batch_size))
+    vjp_skele = partial(example_loss_vjp_skeleton, bs=FLAGS.config.batch_size)
     vjp_head = partial(
         sample_loss_vjp_head,
         per_sample_loss=psl,
