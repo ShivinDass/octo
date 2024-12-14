@@ -45,8 +45,8 @@ OXE_FRANKA_MIX = [
 
 OXE_MAGIC_SOUP = [
     ("fractal20220817_data", 0.54087122203),
-    ("kuka", 0.8341046294),
-    ("bridge_dataset", 1.0),
+    # ("kuka", 0.8341046294),
+    # ("bridge_dataset", 1.0),
     ("taco_play", 2.0),
     ("jaco_play", 1.0),
     ("berkeley_cable_routing", 1.0),
@@ -55,17 +55,17 @@ OXE_MAGIC_SOUP = [
     ("viola", 2.0),
     ("berkeley_autolab_ur5", 2.0),
     ("toto", 1.0),
-    ("language_table", 0.1),
+    # ("language_table", 0.1),
     ("stanford_hydra_dataset_converted_externally_to_rlds", 2.0),
     ("austin_buds_dataset_converted_externally_to_rlds", 1.0),
     ("nyu_franka_play_dataset_converted_externally_to_rlds", 3.0),
-    ("furniture_bench_dataset_converted_externally_to_rlds", 0.1),
+    # ("furniture_bench_dataset_converted_externally_to_rlds", 0.1), # needs tensorflow-graphics
     ("ucsd_kitchen_dataset_converted_externally_to_rlds", 2.0),
     ("austin_sailor_dataset_converted_externally_to_rlds", 1.0),
     ("austin_sirius_dataset_converted_externally_to_rlds", 1.0),
     ("bc_z", 0.2),
     ("dlr_edan_shared_control_converted_externally_to_rlds", 1.0),
-    ("iamlab_cmu_pickup_insert_converted_externally_to_rlds", 1.0),
+    # ("iamlab_cmu_pickup_insert_converted_externally_to_rlds", 1.0), # needs tensorflow-graphics
     # ("uiuc_d3field", 1.0),  --> somehow raw data is broken
     ("utaustin_mutex", 1.0),
     ("berkeley_fanuc_manipulation", 2.0),

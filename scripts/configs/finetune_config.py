@@ -2,7 +2,7 @@ from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 
 
-def get_config(config_string="full,multimodal"):
+def get_config(config_string="full,language_conditioned"):
     mode, task = config_string.split(",")
     assert task in ["image_conditioned", "language_conditioned", "multimodal"]
     assert mode in ["full", "head_only", "head_mlp_only"]
@@ -15,7 +15,7 @@ def get_config(config_string="full,multimodal"):
 
     FINETUNING_KWARGS = {
         "name": "bridge_dataset",
-        "data_dir": "./tests/debug_dataset",
+        "data_dir": "/mnt/hdd1/oxe_data",
         "image_obs_keys": {"primary": "image_0", "wrist": None},
         "state_obs_keys": ["state", None],
         "language_key": "language_instruction",
@@ -23,6 +23,7 @@ def get_config(config_string="full,multimodal"):
         # All actions are relative deltas, except for the last one (gripper) which is absolute
         # Specifying this is only necessary if you want to predict > 1 step into the future
         "absolute_action_mask": [False, False, False, False, False, False, True],
+        "action_normalization_mask": [True, True, True, True, True, True, False],
         # standardize_fn is dynamically loaded from a file
         # for example: "experiments/kevin/custom_standardization_transforms.py:aloha_dataset_transform"
         "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:bridge_dataset_transform",
@@ -56,9 +57,9 @@ def get_config(config_string="full,multimodal"):
         shuffle_buffer_size=10000,
         num_steps=max_steps,
         log_interval=100,
-        eval_interval=5000,
-        save_interval=5000,
-        save_dir=placeholder(str),
+        eval_interval=10000,
+        save_interval=10000,
+        save_dir='/home/shivin/foundation_models/experiments',
         seed=42,
         wandb=dict(
             project="octo_finetune", group=placeholder(str), entity=placeholder(str)

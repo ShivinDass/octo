@@ -27,6 +27,36 @@ Octo uses a modular attention structure in its transformer backbone, allowing it
 to robot setups with new sensory inputs, action spaces, and morphologies, using only a small target domain
 dataset and accessible compute budgets.
 
+## Installation for Jax 0.4.35
+```bash
+conda create -n octo python=3.10
+conda activate octo
+python -m pip install tensorflow[and-cuda]==2.14.0
+pip install numpy==1.24.3
+python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+
+conda install -c "nvidia/label/cuda-12.2.0" cuda-toolkit cuda-compiler cudnn
+pip install --upgrade "jax[cuda12_pip]==0.4.35" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+```
+
+Verify GPU support in JAX is working:
+```
+from jax.lib import xla_bridge
+print(xla_bridge.get_backend().platform)
+```
+
+
+Then install other requirements,
+```
+pip install -e .
+pip install -r requirements.txt # comment out versions for flax
+```
+
+If jax gets downgraded then reinstall by,
+```bash
+pip install --upgrade "jax[cuda12_pip]==0.4.35" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+```
+
 ## Installation with SIMPLER
 First clone octo and simpler and checkout the correct branches,
 ```bash
@@ -38,7 +68,7 @@ cd ~/path/to/dir/SimplerEnv
 git checkout maniskill3
 
 cd ~/path/to/dir/octo
-git checkout 653c54acde686fde619855f2eac0dd6edad7116b # using octo-1.0 (currently testing if octo-1.5 works)
+git checkout octo_simpler # using octo-1.0 (currently testing if octo-1.5 works)
 ```
 
 Now install simpler and octo,
