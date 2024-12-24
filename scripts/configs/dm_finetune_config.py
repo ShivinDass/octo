@@ -2,7 +2,8 @@ from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 
 
-def get_config(config_string="full,multimodal"):
+# def get_config(config_string="full,multimodal"): # old
+def get_config(config_string="full,language_conditioned"): # new
     mode, task = config_string.split(",")
     assert task in ["image_conditioned", "language_conditioned", "multimodal"]
     assert mode in ["full", "head_only", "head_mlp_only"]
@@ -90,7 +91,8 @@ def get_config(config_string="full,multimodal"):
     # max_steps = FieldReference(50000)
     # max_steps = FieldReference(10_000)
     max_steps = FieldReference(5_000)
-    window_size = FieldReference(default=1)
+    # window_size = FieldReference(default=1) # old
+    window_size = FieldReference(default=2) # new
 
     config = dict(
         pretrained_path=placeholder(str),
