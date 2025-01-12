@@ -38,7 +38,7 @@ def seed_to_vjp_lm_kw(random_project_seed, random_projector, optimizer_maker,
     ret = loader_and_data_weight_maker(data_seed)
     train_batcher, val_batcher, data_weights, train_its, val_its = ret
     state0 = optimizer_maker(params, train_its)
-    vjp_kw = dict(state=state0, vjp_head=vjp_head, vjp_skele=vjp_skele,
+    vjp_kw = dict(state=state0, vjp_head=vjp_head, vjp_skele=vjp_skele, 
                   data_weights=data_weights, return_kw=False,
                   train_batcher=train_batcher, val_batcher=val_batcher,
                   model=model, n_train_ba=train_its, n_val_ba=val_its,
@@ -61,7 +61,7 @@ def grad_for_seed_path(seed, saved_dired):
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 
-def projected_state_vjps(seeds, seed_and_projector_to_vjp, projector, save_dir):
+def projected_state_vjps(seeds, seed_and_projector_to_vjp, projector, save_dir): 
     grads = {}
     for seed in seeds:
         save_path = grad_for_seed_path(seed, save_dir)
@@ -78,7 +78,7 @@ def projected_state_vjps(seeds, seed_and_projector_to_vjp, projector, save_dir):
 
     return grads
 
-# one seed:
+# one seed: 
 def estimate_metagradients(vjp_heads, projected_metagrads_per_seed, state,
                            projector):
     metagradient_hats = []
@@ -100,7 +100,7 @@ def estimate_metagradients(vjp_heads, projected_metagrads_per_seed, state,
 
         mg_norm = optax.tree_utils.tree_l2_norm(all_proj_g)
         print('orig_g_norm', orig_g_norm, 'mg_norm', mg_norm)
-        import ipdb; ipdb.set_trace()
+        import pdb; pdb.set_trace()
         primals.append(primal)
         metagradient_hats.append(mg_hat)
 
@@ -164,7 +164,7 @@ def full_calc_projected_lds(seeds, test_index, save_dir):
     primal = 0 # primals[0]
     data_weights = vjp_lm_kw['data_weights']
     vjp_lm_kw['vjp_head'] = vjp_head
-    # import ipdb; ipdb.set_trace()
+    # import pdb; pdb.set_trace()
 
     return lds_for_run(primal, len(mg_hat), 0.1, 0, mg_hat, data_weights, vjp_lm_kw)
 

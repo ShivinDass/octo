@@ -32,6 +32,12 @@ from IPython import embed
 import flags_config
 FLAGS = flags.FLAGS
 
+def slice_batch(batch, sel):
+    if isinstance(batch, dict):
+        return {k: slice_batch(v, sel) for k, v in batch.items()}
+    else:  # numpy array case
+        return batch[sel]
+
 class REPLAYBatch:
     def __init__(self, bs):
         # batch size of this batch
@@ -53,39 +59,6 @@ class REPLAYMinibatches:
         # y: output data
         raise NotImplementedError
 
-class TensorDictDataset:
-    def __init__(self,
-                 data: dict):
-
-        self.data = data
-        self.length = self._get_length(data)
-
-    def __len__(self):
-        return self.length
-
-    def __getitem__(self, idx):
-        items = self._get_item_recursive(self.data, idx)
-        return TensorDictDataset(items)
-
-    def _get_item_recursive(self, data, idx):
-        if isinstance(data, dict):
-            return {k: self._get_item_recursive(v, idx) for k, v in data.items()}
-        else:
-            return data[idx]
-
-    def _get_length(self, data):
-        if isinstance(data, dict):
-            # Recursively search for a numpy array to determine the length
-            for v in data.values():
-                length = self._get_length(v)
-                if length is not None:
-                    return length
-
-            return None
-
-        else:
-            return data.shape[0]
-
 class OctoREPLAYBatch(REPLAYBatch):
     def __init__(self,
                  batch: dict,
@@ -96,13 +69,15 @@ class OctoREPLAYBatch(REPLAYBatch):
         assert bs % minibs == 0, "Minibatch size does not divise batch size"
 
         super().__init__(bs)
-        self.batch = TensorDictDataset(batch)
+        self.batch = batch
         self.minibs = minibs
         self.sharding = sharding
 
     def get_minibatches(self, part: str):
-        # batch = jax.device_put(self.batch, self.sharding)
-        batch = self.batch
+        if self.sharding is not None:
+            batch = jax.device_put(self.batch, self.sharding)
+        else:
+            batch = self.batch
         minibs = int({
             # 'train': 1,
             # 'val': 1,
@@ -116,7 +91,7 @@ class OctoREPLAYBatch(REPLAYBatch):
 class OctoREPLAYMinibatches(REPLAYMinibatches):
     def __init__(self,
                  bs: int,
-                 batch: TensorDictDataset,
+                 batch: dict,
                  minibs: int):
 
         super().__init__(bs)
@@ -125,29 +100,17 @@ class OctoREPLAYMinibatches(REPLAYMinibatches):
 
     def make_iterator(self, batch, minibs):
         s = 0
-        this_bs = batch.length
+        this_bs = self.bs
         while True:
             e = min(s + minibs, this_bs)
-            # no longer relevant here
-            # ixs, (x, y) = batch
-            # instead we will have batch['indices']
             sel = slice(s, e)
             s = e
-            mini_batch = batch[sel]
 
-            # yield mini_batch.data
+            mini_batch = slice_batch(batch, sel)
 
-            ret = mini_batch.data
-            indices = ret.get('index', None)
+            indices = mini_batch.get('index', None)
             y = None
-            yield indices, (ret, y)
-
-            # ixs, x, y = ixs[sel], x[sel], y[sel]
-
-            # no longer relvant
-            # yield ixs, (x, y)
-            # we want instead
-            # yield mini_batch['indices'], mini_batch
+            yield indices, (mini_batch, y)
 
             if e == this_bs:
                 break
@@ -188,6 +151,11 @@ def make_replay_dataset(start_batch: int,
     config = config.to_dict()
     check_config_diff(config, pretrained_model.config)
 
+    if train:
+        dataset_kwargs = FLAGS.config.dataset_kwargs
+    else:
+        dataset_kwargs = FLAGS.config.val_dataset_kwargs
+
     # create text processor
     if config["text_processor"] is None:
         text_processor = None
@@ -200,20 +168,26 @@ def make_replay_dataset(start_batch: int,
         del batch["dataset_name"]
         return batch
 
+    del pretrained_model
+
     # load standardize_fn from `path/to/file.py:fn_name` format
     if (
-        standardize_fn := FLAGS.config["dataset_kwargs"].get("standardize_fn", None)
+        standardize_fn := dataset_kwargs.get("standardize_fn", None)
     ) is not None:
 
         if isinstance(standardize_fn, str):
             path, name = standardize_fn.split(":")
             # imp is deprecated, but it's also what ml_collections uses
             standardize_fn = getattr(imp.load_source("standardize_fn", path), name)
-            del FLAGS.config["dataset_kwargs"]["standardize_fn"]
-            FLAGS.config["dataset_kwargs"]["standardize_fn"] = standardize_fn
+            if train:
+                del FLAGS.config["dataset_kwargs"]["standardize_fn"]
+                FLAGS.config["dataset_kwargs"]["standardize_fn"] = standardize_fn
+            else:
+                del FLAGS.config["val_dataset_kwargs"]["standardize_fn"]
+                FLAGS.config["val_dataset_kwargs"]["standardize_fn"] = standardize_fn
 
         elif isinstance(standardize_fn, types.FunctionType):
-            standardize_fn = FLAGS.config["dataset_kwargs"]["standardize_fn"]
+            standardize_fn = dataset_kwargs["standardize_fn"]
 
         else:
             raise ValueError
@@ -227,7 +201,8 @@ def make_replay_dataset(start_batch: int,
     tf.random.set_seed(FLAGS.config.seed)
     # create dataset object
     dataset = make_single_dataset(
-        FLAGS.config.dataset_kwargs,
+        # FLAGS.config.dataset_kwargs,
+        dataset_kwargs,
         traj_transform_kwargs=FLAGS.config.traj_transform_kwargs,
         frame_transform_kwargs=FLAGS.config.frame_transform_kwargs,
         train=train,
@@ -235,15 +210,15 @@ def make_replay_dataset(start_batch: int,
         num_parallel_calls=1,
         num_parallel_reads=1,
     )
-    dataset_statistics = dataset.dataset_statistics
-    dataset = dataset.cache()
-    dataset.dataset_statistics = dataset_statistics
+    # dataset_statistics = dataset.dataset_statistics
+    # dataset = dataset.cache()
+    # dataset.dataset_statistics = dataset_statistics
 
     print('Collecting unique indices')
     print('###########################')
     print('Need to fix this at the end')
     print('###########################')
-    unique_indices = 1_000 * [0]
+    unique_indices = np.empty(1_000_000)
     # unique_indices = set()
     # one_time_iter = (
     #     dataset
@@ -262,26 +237,40 @@ def make_replay_dataset(start_batch: int,
 
     # create iterator over dataset
     # skip first few batches
-    skip_samples = start_batch * FLAGS.config.batch_size
+    if train:
+        batch_size = FLAGS.config.batch_size
+    else:
+        batch_size = FLAGS.config.val_batch_size
+
+    # skip_samples = start_batch * FLAGS.config.batch_size
+    skip_samples = start_batch * batch_size
+    # prefetch_buffer_size = tf.data.AUTOTUNE
+    # prefetch_buffer_size = jax.device_count() * 1
     data_iterator = (
         dataset.repeat()
         .unbatch()
         .shuffle(FLAGS.config.shuffle_buffer_size, seed=FLAGS.config.seed)
         .skip(skip_samples)
-        .batch(FLAGS.config.batch_size)
+        .batch(batch_size)
         .prefetch(buffer_size=tf.data.AUTOTUNE)
         .iterator()
     )
+
     data_iterator = map(process_batch, data_iterator)
 
     return data_iterator, data_weights
 
     ############################################
 
-def make_replay_iterators(start_batch, end_batch, sharding, data_iterator, global_seed, batch_size):
+def make_replay_iterators(start_batch, end_batch, sharding, data_iterator, mode, global_seed, batch_size):
 
     # start returning batches
     batch_idx = start_batch
+
+    if mode == 'train':
+        minibs = FLAGS.config.mini_batch_size
+    else:
+        minibs = FLAGS.config.mini_val_batch_size
 
     while batch_idx < end_batch:
         batch = next(data_iterator)
@@ -293,9 +282,9 @@ def make_replay_iterators(start_batch, end_batch, sharding, data_iterator, globa
 
         replay_batch = OctoREPLAYBatch(
             batch=batch,
-            bs=FLAGS.config.batch_size,
-            minibs=FLAGS.config.mini_batch_size,
-            sharding=None,
+            bs=batch_size,
+            minibs=minibs,
+            sharding=sharding,
         )
 
         yield replay_batch
@@ -309,7 +298,13 @@ def make_split_loader_and_data_weights(start_batch: int,
     assert mode in ['train', 'val', 'test']
 
     ds_iter, _ = make_replay_dataset(start_batch, end_batch, sharding, train=(mode=='train'))
-    return make_replay_iterators(start_batch, end_batch, sharding, ds_iter, global_seed=seed, batch_size=FLAGS.config.batch_size)
+    if mode == 'train':
+        batch_size = FLAGS.config.batch_size
+    else:
+        batch_size = FLAGS.config.val_batch_size
+
+    # return make_replay_iterators(start_batch, end_batch, sharding, ds_iter, global_seed=seed, batch_size=FLAGS.config.batch_size)
+    return make_replay_iterators(start_batch, end_batch, sharding, ds_iter, mode=mode, global_seed=seed, batch_size=batch_size)
 
 def main(_):
     start_batch = 0

@@ -2,6 +2,7 @@ from functools import partial
 import jax.numpy as jnp
 import jax
 from typing import NamedTuple
+# from optax import tree_utils as otu
 import jax.numpy as jnp
 from optax._src import numerics
 from jax import tree_util as jtu
@@ -14,7 +15,6 @@ from ..utils import make_shardings
 CACHED_PARTIAL_CONSTRUCTOR = None
 
 from typing import Any, Optional
-
 def tree_zeros_like(
         tree: Any,
         dtype: Optional[jax.typing.DTypeLike] = None,
@@ -105,9 +105,13 @@ def safe_zeros_like(x, make_tangent):
 def make_adam_optimizer(initial_params, train_its, lr, wd, pct_start, pct_final,
                         b1, b2, min_lr_relative, final_min_lr_relative, eps,
                         eps_sqrt, selective_wd, dtype, factored_lr_wd=False,
-                        anneal_type=None, eps_schedule=None,
-                        mom_schedule=None, per_param_lr=-1,
-                        reuse_optimizer=None):
+                        anneal_type=None, eps_schedule=None, mom_schedule=None,
+                        per_param_lr=-1, reuse_optimizer=None):
+    ps = locals()
+    # remove initial_params
+    del ps['initial_params']
+    print('>> OPTIMIZER PARAMS', ps)
+
     assert reuse_optimizer is not None
     global CACHED_PARTIAL_CONSTRUCTOR
     sharding, replicated_sharding = make_shardings()
@@ -139,12 +143,14 @@ def make_adam_optimizer(initial_params, train_its, lr, wd, pct_start, pct_final,
         return nondiff_opt_state
 
     if reuse_optimizer and CACHED_PARTIAL_CONSTRUCTOR is not None:
+        print('>> REUSING OPTIMIZER')
         partial_constructor = CACHED_PARTIAL_CONSTRUCTOR
     else:
         nondiff_opt_state = construct_unjittable_opt_state()
         partial_constructor = partial(base_optimizer,
                                       unjittable_opt_state=nondiff_opt_state)
         if reuse_optimizer:
+            print('>> SAVING OPTIMIZER FOR LATER')
             CACHED_PARTIAL_CONSTRUCTOR = partial_constructor
 
     # now make the diff opt state
@@ -329,9 +335,8 @@ def old_adam_step(opt, params, state, updates, AdamState, per_param_lr):
 
     mu_hat = bias_correction(mu, b1, count_inc)
     nu_hat = bias_correction(nu, b2, count_inc)
-
     updates = jtu.tree_map(
-        lambda m, v: m * jax.lax.rsqrt(v + eps_root), mu_hat, nu_hat)
+        lambda m, v: m * (jax.lax.rsqrt(v + eps_root) + eps_root), mu_hat, nu_hat)
 
     # then get the current learning rate
     max_lr = opt.max_lr

@@ -17,19 +17,13 @@ def get_config(config_string="full,language_conditioned"): # new
     FINETUNING_KWARGS = {
         "name": "bridge_dataset",
         # "data_dir": "./tests/debug_dataset",
-        # "name": "bridge_dataset",
+
+        "data_dir": "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/train",
         # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/traj_data",
-        "data_dir": "/mnt/xfs/home/alaakh/store/oxe/train_val_splits/train",
+
         "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:bridge_dataset_transform",
         "image_obs_keys": {"primary": "image_0", "wrist": None},
         "state_obs_keys": ["state", None],
-
-        # "name": "cmu_stretch",
-        # # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/data",
-        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/traj_data",
-        # "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:cmu_stretch_dataset_transform",
-        # "image_obs_keys": {"primary": "image", "wrist": None},
-        # "state_obs_keys": ["state", None],
 
         "language_key": "language_instruction",
         "action_proprio_normalization_type": "normal",
@@ -46,20 +40,14 @@ def get_config(config_string="full,language_conditioned"): # new
     FINETUNING_VAL_KWARGS = {
         "name": "bridge_dataset",
         # "data_dir": "./tests/debug_dataset",
-        # "name": "bridge_dataset",
         # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/traj_data",
         # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/train_val_splits/train",
-        "data_dir": "/mnt/xfs/home/alaakh/store/oxe/train_val_splits/val",
+        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/train_val_splits/val",
+        "data_dir": "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/val",
+
         "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:bridge_dataset_transform",
         "image_obs_keys": {"primary": "image_0", "wrist": None},
         "state_obs_keys": ["state", None],
-
-        # "name": "cmu_stretch",
-        # # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/data",
-        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/traj_data",
-        # "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:cmu_stretch_dataset_transform",
-        # "image_obs_keys": {"primary": "image", "wrist": None},
-        # "state_obs_keys": ["state", None],
 
         "language_key": "language_instruction",
         "action_proprio_normalization_type": "normal",
@@ -89,14 +77,21 @@ def get_config(config_string="full,language_conditioned"): # new
         raise ValueError("Invalid mode")
 
     # max_steps = FieldReference(50000)
-    # max_steps = FieldReference(10_000)
-    max_steps = FieldReference(5_000)
+    max_steps = FieldReference(10_000)
+    # max_steps = FieldReference(5_000)
+    # max_steps = FieldReference(2_000)
     # window_size = FieldReference(default=1) # old
     window_size = FieldReference(default=2) # new
 
     config = dict(
         pretrained_path=placeholder(str),
         pretrained_step=placeholder(int),
+
+        # num_workers=8,
+        # num_workers=32,
+        # num_workers=48,
+        num_workers=64,
+
         batch_size=512,
         mini_batch_size=128,
         val_batch_size=16,
@@ -104,6 +99,13 @@ def get_config(config_string="full,language_conditioned"): # new
         # batch_size=128,
         shuffle_buffer_size=10000,
         num_steps=max_steps,
+        bob_steps=100,
+        candidate_size=0.5,
+
+        # num_steps=30,
+        # bob_steps=2,
+        # candidate_size=0.01,
+
         log_interval=100,
         # eval_interval=5000,
         # save_interval=5000,
@@ -127,6 +129,7 @@ def get_config(config_string="full,language_conditioned"): # new
                 peak_value=3e-4,
                 # warmup_steps=2000,
                 warmup_steps=int(0.05 * max_steps.get()),
+                # warmup_steps=int(0.1 * max_steps.get()),
                 decay_steps=max_steps,
                 end_value=0.0,
             ),

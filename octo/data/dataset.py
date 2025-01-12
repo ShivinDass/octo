@@ -459,8 +459,21 @@ def make_single_dataset(
         num_parallel_reads=num_parallel_reads,
         shuffle=shuffle,
     )
-    dataset = apply_trajectory_transforms(dataset, **traj_transform_kwargs, train=train, num_parallel_calls=num_parallel_calls)
-    dataset = apply_frame_transforms(dataset, **frame_transform_kwargs, train=train, num_parallel_calls=num_parallel_calls)
+
+    dataset = apply_trajectory_transforms(
+        dataset,
+        **traj_transform_kwargs,
+        # train=train,
+        train=False,
+        num_parallel_calls=num_parallel_calls
+    )
+    dataset = apply_frame_transforms(
+        dataset,
+        **frame_transform_kwargs,
+        # train=train,
+        train=False,
+        num_parallel_calls=num_parallel_calls
+    )
 
     # this seems to reduce memory usage without affecting speed
     dataset = dataset.with_ram_budget(1)

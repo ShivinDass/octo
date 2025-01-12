@@ -22,7 +22,6 @@ def calculate_lds(model_seed, data_seed, test_sample, bs, drop_frac, lds_seed,
         vjp_head = partial(one_sample_vjp_head, test_index=test_sample)
 
     vjp_skele = make_vjp_skele(bs)
-
     model, params = model_maker(model_seed)
 
     ret = load_and_data_weight_maker(data_seed)
@@ -34,11 +33,12 @@ def calculate_lds(model_seed, data_seed, test_sample, bs, drop_frac, lds_seed,
                   data_weights=data_weights, return_kw=False,
                   train_batcher=train_batcher, val_batcher=val_batcher,
                   model=model, n_train_ba=train_its, n_val_ba=val_its,
-                  aux_datasets={}, forward_only=False)
+                  aux_datasets={}, forward_only=False, bs=bs, return_state=True)
 
     ret = vjp_lm(**vjp_kw)
     y0 = float(ret['primal'])
     deps = ret['deps']
+    final_state = ret['final_state']
     batch_indices = ret['batch_indices']
     num_datapoints = data_weights.size
 
@@ -54,18 +54,42 @@ def calculate_lds(model_seed, data_seed, test_sample, bs, drop_frac, lds_seed,
         grad = np.concatenate([grad, np.zeros((num_datapoints - len(grad),))])
         print(grad)
 
-    return lds_for_run(y0, num_datapoints, drop_frac, lds_seed, grad,
-                       data_weights, vjp_kw)
+    ret = lds_for_run(y0, num_datapoints, drop_frac, lds_seed, grad,
+                      data_weights, vjp_kw)
+    sr, pr, yhat, y_true, all_drop_indices = ret
+    # dict with: 
+    # - train_ds: tuple of train_loader_fn and n_train_iter
+    # - val_ds: tuple of val_loader_fn and n_val_iter
+    # - test_indices: indices to test set
+    # - domain: 'wikitext' or 'cifar'
+    # - params: model parameters WITHOUT state
+    to_save = {
+        'train_ds': (train_batcher, train_its),
+        'val_ds': (val_batcher, val_its),
+        'test_indices': np.arange(val_its * bs),
+        'trial_index': test_sample,
+        'domain': 'wikitext',
+        'params': final_state.params,
+        'yhat_mg': yhat,
+        'y_true': y_true,
+        'all_drop_indices': all_drop_indices,
+        'spearman': sr,
+        'pearson': pr
+    }
+
+    return to_save
 
 def lds_for_run(y0, num_datapoints, drop_frac, lds_seed, grad, data_weights,
-                vjp_kw, num_trials=20):
+                vjp_kw, num_trials=10):
     ys = [y0]
     y_hats = [y0]
 
     num_leave_out = int(num_datapoints * drop_frac)
     rng = np.random.default_rng(lds_seed + SEED_SPACING)
+    all_drop_indices = []
     for _ in range(num_trials):
         drop_indices = rng.choice(num_datapoints, num_leave_out, replace=False)
+        all_drop_indices.append(drop_indices)
         this_data_weights = data_weights.at[drop_indices].set(0)
         this_jvp_kw = {k: v for k, v in vjp_kw.items()}
         this_jvp_kw.update(dict(
@@ -86,15 +110,15 @@ def lds_for_run(y0, num_datapoints, drop_frac, lds_seed, grad, data_weights,
     pr = pearsonr(ys, y_hats)
     print("Spearman:", sr)
     print("Pearson:", pr)
-    import ipdb; ipdb.set_trace()
-    return sr, pr
+    return sr, pr, y_hats, ys, all_drop_indices
 
 def grad_from_store(deps, batch_indices):
     flat_deps = {k: v for d in deps.values() for k, v in d.items()}
-    num_datapoints = max(b.max() for b in batch_indices) + 1
+    num_datapoints = max(b.max() for b in batch_indices.values()) + 1
     gradient = np.zeros((num_datapoints,), dtype=np.float32)
 
-    for i, bixs in enumerate(batch_indices):
-        gradient[bixs] += flat_deps[i]
+    for batch_n, indices in batch_indices.items():
+        print('>> RESTORING: Batch', batch_n, 'has', len(indices), 'indices')
+        gradient[indices] += flat_deps[batch_n]
 
     return gradient

@@ -340,11 +340,17 @@ class OctoModel:
                 checkpoint_path, "dataset_statistics.json"
             )
             if not tf.io.gfile.exists(dataset_statistics_path):
-                with tf.io.gfile.GFile(dataset_statistics_path, "w") as f:
-                    json.dump(
-                        jax.tree_map(lambda x: x.tolist(), self.dataset_statistics),
-                        f,
-                    )
+                try:
+                    with tf.io.gfile.GFile(dataset_statistics_path, "w") as f:
+                        json.dump(
+                            jax.tree_map(lambda x: x.tolist(), self.dataset_statistics),
+                            f,
+                        )
+                except:
+                    with tf.io.gfile.GFile(dataset_statistics_path, "w") as f:
+                        json.dump(
+                            self.dataset_statistics, f,
+                        )
 
     @classmethod
     def from_config(

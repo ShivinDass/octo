@@ -1,7 +1,10 @@
 import os
+import gc
 import jax
 import flax
 import numpy as np
+from copy import deepcopy
+from tqdm import tqdm
 import tensorflow as tf
 from datetime import datetime
 
@@ -15,7 +18,9 @@ from scipy.stats import spearmanr, pearsonr
 
 from octo.utils.jax_utils import initialize_compilation_cache
 
-from make_loader import make_split_loader_and_data_weights, make_replay_dataset
+from make_loader_mds import make_split_loader_and_data_weights, make_replay_dataset
+# from make_loader import make_split_loader_and_data_weights, make_replay_dataset
+
 from make_model import make_model
 from jax_lm.domains.vjp_robodm import vjp_robodm
 from jax_lm.metagradients.optimizers.adam import make_adam_optimizer
@@ -29,13 +34,69 @@ from IPython import embed
 from absl import flags, app
 from ml_collections import config_flags
 
-jax.config.update("jax_disable_jit", True)
+# jax.config.update("jax_disable_jit", True)
 
 import flags_config
 FLAGS = flags.FLAGS
 
 EPS = 1.0000000000000001e-11
 SEED_SPACING = 100000
+
+# os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
+
+def lds_for_run(y0, num_datapoints, drop_frac, lds_seed, grad, data_weights,
+                vjp_kw, num_trials=20):
+
+    ys = [y0]
+    y_hats = [y0]
+
+    candidate_grad = grad[1_000_000:]
+    candidate_samples = 1_000_000 + np.where(candidate_grad != 0)[0]
+    # num_leave_out = int(num_datapoints * drop_frac)
+    num_leave_out = int(len(candidate_samples) * drop_frac)
+    # num_leave_out = 32
+    rng = np.random.default_rng(lds_seed + SEED_SPACING)
+    all_drop_indices = []
+    for _ in range(num_trials):
+        # drop_indices = rng.choice(num_datapoints, num_leave_out, replace=False)
+        drop_indices = rng.choice(candidate_samples, num_leave_out, replace=False)
+        all_drop_indices.append(drop_indices)
+        # this_data_weights = data_weights.at[drop_indices].set(0)
+        this_data_weights = data_weights.at[drop_indices].set(1)
+        this_jvp_kw = {k: v for k, v in vjp_kw.items()}
+        this_jvp_kw.update(dict(
+            data_weights=this_data_weights,
+            forward_only=True
+        ))
+
+        # ret = vjp_lm(**this_jvp_kw)
+        ret = vjp_robodm(**this_jvp_kw)
+        ys.append(float(ret['primal']))
+
+        y_hat = y0 + grad @ (this_data_weights - data_weights)
+        y_hats.append(float(y_hat))
+
+    ys = np.array(ys)
+    y_hats = np.array(y_hats)
+
+    sr = spearmanr(ys, y_hats)
+    pr = pearsonr(ys, y_hats)
+    print("Spearman:", sr)
+    print("Pearson:", pr)
+    return sr, pr, y_hats, ys, all_drop_indices
+
+def grad_from_store(deps, batch_indices):
+    flat_deps = {k: v for d in deps.values() for k, v in d.items()}
+    # num_datapoints = max(b.max() for b in batch_indices) + 1
+    num_datapoints = max(b.max() for b in batch_indices.values()) + 1
+    gradient = np.zeros((num_datapoints,), dtype=np.float32)
+
+    # for i, bixs in enumerate(batch_indices):
+        # gradient[bixs] += flat_deps[i]
+    for batch_n, indices in batch_indices.items():
+        gradient[indices] += flat_deps[batch_n]
+
+    return gradient
 
 @cache
 def make_vjp_skele(bs):
@@ -49,7 +110,7 @@ def per_sample_loss_fn(params,
                        frozen_params,
                        train,
                        data_weights=None,
-                       divisor=None):
+                       divisor=1.0):
 
     """
     inputs:
@@ -65,7 +126,6 @@ def per_sample_loss_fn(params,
     all_params = flax.traverse_util.unflatten_dict(all_params)
 
     model = model.replace(params=all_params)
-
 
     _, (data, _) = batch[:2]
     assert 'seed' in data
@@ -92,7 +152,6 @@ def per_sample_loss_fn(params,
     if data_weights is not None:
         indices = data['index']
         these_data_weights = data_weights[indices]
-        jax.debug.print('---{dw}',dw=these_data_weights)
         action_loss = action_loss * these_data_weights
 
     return action_loss / divisor
@@ -102,52 +161,58 @@ def compute_datamodels_lds():
     initialize_compilation_cache()
     devices = jax.devices()
 
-    # # create a 1D mesh with a single axis named "batch"
-    # mesh = Mesh(jax.devices(), axis_names="batch")
-    # # Our batches will be data-parallel sharded -- each device will get a slice of the batch
-    # dp_sharding = NamedSharding(mesh, PartitionSpec("batch"))
-    # # Our model will be replicated across devices (we are only doing data parallelism, not model parallelism)
-    # replicated_sharding = NamedSharding(mesh, PartitionSpec())
-
     # prevent tensorflow from using GPU memory since it's only used for data loading
     tf.config.set_visible_devices([], "GPU")
 
-    ######### need to implement this #########
-    # if test_sample is None:
-    #     vjp_head = sample_loss_vjp_head
-    # else:
-    #     vjp_head = partial(one_sample_vjp_head, test_index=test_sample)
+    # formatted_date_time = datetime.now().strftime("%d-%b-%Y_%I-%M-%S%p").lower()
+    # formatted_date_time = 'test'
+    formatted_date_time = 'test2'
+    checkpoint_path = os.path.join(FLAGS.config.save_dir, FLAGS.config.dataset_kwargs.name, formatted_date_time)
+    print('Checkpoint path:', checkpoint_path)
 
-    # vjp_skele = make_vjp_skele(bs)
-    ##########################################
+    os.makedirs(checkpoint_path, exist_ok=True)
 
-    ######### need to implement this #########
-    # model, params = model_maker(model_seed)
-    ##########################################
+    FLAGS.config.checkpoint_path = checkpoint_path
 
     _, data_weights = make_replay_dataset(0, 1e5, None, train=True, return_dw_only=True)
+    data_weights = jax.numpy.concatenate(
+        [data_weights, jax.numpy.zeros_like(data_weights)],
+        axis=0
+    )
     train_batcher = partial(make_split_loader_and_data_weights, mode='train', seed=FLAGS.config.seed)
-    # train_its = FLAGS.config.num_steps
-    # train_its = 1_000
-    # train_its = 10
-    train_its = 2
+    train_its = FLAGS.config.num_steps
+    # train_its = 10_000
+    # train_its = 20
+    # train_its = 2
 
-    # # quick test to see if this works
-    # for batch in train_batcher(0, 5, ""):
+    bob_its = FLAGS.config.bob_steps
+    forward_its = train_its - bob_its
+
+    # from flatten_dict import flatten
+    # i = 0
+    # for batch in tqdm(train_batcher(0, 10_000, None), total=10_000):
+    # # for batch in tqdm(train_batcher(3_799, 3_810, None), total=10_000):
     #     for item in batch.get_minibatches('train'):
+    #         print(item[1][0].keys())
     #         pass
+            # item_flat = flatten(item[1][0], 'dot')
+            # for k, v in item_flat.items():
+            #     print(f'{k}: {v.dtype} and {v.shape}')
+    #     i += 1
+    #     if i > 200:
+    #         break
 
     val_batcher = partial(make_split_loader_and_data_weights, mode='val', seed=FLAGS.config.seed)
     # val_its = FLAGS.config.num_val_steps
     val_its = 1
+    # val_batcher(0, 5, "")
 
     # # quick test to see if this works
     # for batch in val_batcher(0, 5, ""):
     #     for item in batch.get_minibatches('val'):
-    #         bp()
     #         pass
 
-    model, frozen_params, trainable_params = make_model()
+    model, frozen_params, trainable_params = make_model(train_batcher)
 
     num_trainable_params = sum(x.size for x in jax.tree_util.tree_leaves(trainable_params))
     num_frozen_params = sum(x.size for x in jax.tree_util.tree_leaves(frozen_params))
@@ -181,7 +246,8 @@ def compute_datamodels_lds():
 
     OPTIMIZER_KWARGS = {
         'lr': lr_scheduler_dict['peak_value'],
-        'wd': 1e-5,
+        # 'wd': 1e-5,
+        'wd': optimizer_dict['weight_decay'],
         'pct_start': lr_scheduler_dict['warmup_steps'] / lr_scheduler_dict['decay_steps'],
         'pct_final': 1,
         'b1': 0.9,
@@ -208,8 +274,6 @@ def compute_datamodels_lds():
         **OPTIMIZER_KWARGS,
     )
 
-    # state0 = optimizer_maker(params, train_its)
-
     aux_datasets = {}
     return_state = True
     return_kw = False
@@ -217,8 +281,7 @@ def compute_datamodels_lds():
     sharding, replicated_sharding = make_shardings()
     head_val_batcher = jax.tree_util.Partial(val_batcher, sharding=sharding)
 
-    # vjp_skele = jax.tree_util.Partial(partial(example_loss_vjp_skeleton, bs=FLAGS.config.batch_size))
-    vjp_skele = partial(example_loss_vjp_skeleton, bs=FLAGS.config.batch_size)
+    vjp_skele = jax.tree_util.Partial(partial(example_loss_vjp_skeleton, bs=FLAGS.config.batch_size))
     vjp_head = partial(
         sample_loss_vjp_head,
         per_sample_loss=psl,
@@ -235,23 +298,41 @@ def compute_datamodels_lds():
         train_batcher=train_batcher,
         val_batcher=val_batcher,
         psl=psl,
-        n_train_ba=train_its,
+        n_train_ba=forward_its, # not train_its
         n_val_ba=val_its,
         aux_datasets=aux_datasets,
-        return_state=return_state,
-        # forward_only=True,
-        forward_only=False,
+        return_state=True,
+        forward_only=True,
+        # forward_only=False,
     )
 
     ret = vjp_robodm(**vjp_kw)
 
-    y0 = float(ret['primal'])
-    deps = ret['deps']
-    batch_indices = ret['batch_indices']
+    vjp_kw.update(dict(
+        state=ret['final_state'],
+        n_train_ba=train_its,
+        forward_only=False,
+    ))
+
+    final_ret = vjp_robodm(**vjp_kw)
+
+    # y0 = float(ret['primal'])
+    # deps = ret['deps']
+    # batch_indices = ret['batch_indices']
+    # final_state = ret['final_state']
+
+    y0 = float(final_ret['primal'])
+    deps = final_ret['deps']
+    batch_indices = final_ret['batch_indices']
+    final_state = final_ret['final_state']
     num_datapoints = data_weights.size
 
     # merging final params
-    final_params = ret['final_state'].params
+
+    # print('remove this later')
+    # final_state = ret['final_state']
+
+    final_params = final_state.params
 
     final_params = flax.traverse_util.flatten_dict(final_params)
     flat_frozen_params = flax.traverse_util.flatten_dict(frozen_params)
@@ -262,14 +343,12 @@ def compute_datamodels_lds():
     model = model.replace(params=all_params)
 
     # save model
-    formatted_date_time = datetime.now().strftime("%d-%b-%Y_%I-%M-%S%p").lower()
-    checkpoint_path = os.path.join(FLAGS.config.save_dir, FLAGS.config.dataset_kwargs.name, formatted_date_time)
-
-    bp()
     model.save_pretrained(step=train_its, checkpoint_path=checkpoint_path)
     # model.load_pretrained(step=train_its, checkpoint_path=checkpoint_path)
 
-    raise NotImplementedError
+    import json
+    with open(os.path.join(checkpoint_path, 'hparams_config.json'), 'w') as f:
+        json.dump(FLAGS.config.to_dict(), f, indent=4)
 
     grad = grad_from_store(deps, batch_indices)
     print(grad)
@@ -283,52 +362,16 @@ def compute_datamodels_lds():
         grad = np.concatenate([grad, np.zeros((num_datapoints - len(grad),))])
         print(grad)
 
-    return lds_for_run(y0, num_datapoints, drop_frac, lds_seed, grad,
-                       data_weights, vjp_kw)
+    grad_path = os.path.join(checkpoint_path, 'datamodels.npy')
+    np.save(grad_path, grad)
 
-def lds_for_run(y0, num_datapoints, drop_frac, lds_seed, grad, data_weights,
-                vjp_kw, num_trials=20):
-    raise NotImplementedError
-    ys = [y0]
-    y_hats = [y0]
+    drop_frac = 0.01
+    lds_seed = FLAGS.config.seed
 
-    num_leave_out = int(num_datapoints * drop_frac)
-    rng = np.random.default_rng(lds_seed + SEED_SPACING)
-    for _ in range(num_trials):
-        drop_indices = rng.choice(num_datapoints, num_leave_out, replace=False)
-        this_data_weights = data_weights.at[drop_indices].set(0)
-        this_jvp_kw = {k: v for k, v in vjp_kw.items()}
-        this_jvp_kw.update(dict(
-            data_weights=this_data_weights,
-            forward_only=True
-        ))
+    lds_res = lds_for_run(y0, num_datapoints, drop_frac, lds_seed, grad,
+                       data_weights, vjp_kw, num_trials=5)
 
-        ret = vjp_lm(**this_jvp_kw)
-        ys.append(float(ret['primal']))
-
-        y_hat = y0 + grad @ (this_data_weights - data_weights)
-        y_hats.append(float(y_hat))
-
-    ys = np.array(ys)
-    y_hats = np.array(y_hats)
-
-    sr = spearmanr(ys, y_hats)
-    pr = pearsonr(ys, y_hats)
-    print("Spearman:", sr)
-    print("Pearson:", pr)
-    import pdb; pdb.set_trace()
-    return sr, pr
-
-def grad_from_store(deps, batch_indices):
-    import numpy as np
-    flat_deps = {k: v for d in deps.values() for k, v in d.items()}
-    num_datapoints = max(b.max() for b in batch_indices) + 1
-    gradient = np.zeros((num_datapoints,), dtype=np.float32)
-
-    for i, bixs in enumerate(batch_indices):
-        gradient[bixs] += flat_deps[i]
-
-    return gradient
+    return lds_res, vjp_kw
 
 def main(_):
     # compute_datamodels_lds(model_seed,
@@ -341,7 +384,10 @@ def main(_):
     #                        model_maker,
     #                        optimizer_maker)
 
-    compute_datamodels_lds()
+    ret, vjp_kw = compute_datamodels_lds()
+    sr, pr, y_hats, ys, all_drop_indices = ret
+    print('lds:', sr)
+    bp()
 
 if __name__ == '__main__':
     app.run(main)
