@@ -3,6 +3,7 @@ import dill
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 from scipy.stats import spearmanr, pearsonr
 import jax
+import jax.numpy as jnp
 
 from slapreduce import slap, collect
 from pathlib import Path
@@ -55,7 +56,6 @@ def construct_pre_projector(name, metadata):
         f = random_projector_for_proj_dim(proj_dim)
         return jax.tree_util.Partial(f, seed=seed, linear_combo=this_basis_vector)
 
-
     raise ValueError(f'Unknown projector name {name}')
 
 DEFAULT_PARTITION = 'h100'
@@ -64,12 +64,15 @@ def _to_vjp(vjp_head, return_state, forward_only, drop_frac=None,
             drop_seed=None, return_data_weight=False, get_vjp_head_kw=False):
     raise NotImplementedError
 
+from metagradients.dlpack import dlpack_blocking_gpu2cpu
+
 def left_project_one_d(pre_projector, to_vjp):
     # returns: meta-gradient sized JzPT 
     projector = make_projector(pre_projector)
     ret = to_vjp(projector, return_state=False, forward_only=False,
                  drop_frac=None, drop_seed=None, return_data_weight=False)
     grad = grad_from_store(ret['deps'], ret['batch_indices'])
+    grad = dlpack_blocking_gpu2cpu(grad)
     return grad
 
 @jax.jit
@@ -117,7 +120,9 @@ def right_project(collect_dir, out_heads, state_path, to_vjp):
         total_grads.append(total_grad)
         primals.append(primal)
 
-    return total_grads, primals
+    ret = total_grads, primals
+    ret = dlpack_blocking_gpu2cpu(ret)
+    return ret
 
 def make_projector(pre_projector):
     pre_projector = construct_pre_projector(*pre_projector)
@@ -163,13 +168,15 @@ def lowrank_vjp_with_lds(to_vjp, pre_projectors, out_heads, scratch_dir,
     ]
 
     project_dir = scratch_dir / 'projections'
-
     slap(left_project_one_d, map_xs_per_proj_dimension, project_dir,
          gres=gres, partition=partition, block=True, job_name='left_project')
 
     state_path = scratch_dir / 'state.dill'
     if not state_path.exists():
-        train_model_at_location(scratch_dir, to_vjp, out_heads[0], gres)
+        this_gres = {k: v for k, v in gres.items()}
+        this_gres['gres'] = 'gpu:4'
+        this_gres['cpus_per_taks'] = '4'
+        train_model_at_location(scratch_dir, to_vjp, out_heads[0], this_gres)
 
     # now get the vjps
     # total_grads, primals = right_project(project_dir, out_heads, state_path)
@@ -225,8 +232,6 @@ def replace_state(base_state, new_state):
 
 def wipe_state(base_state):
     return base_state.replace(opt_state=None, params=None)
-
-import jax.numpy as jnp
 
 def calculate_lds(lds_model_path, right_project_path, out_heads, to_vjp):
     # ys: length num states list of out_head outputs (# num states x # out_heads)

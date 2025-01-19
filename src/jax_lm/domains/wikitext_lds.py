@@ -93,10 +93,13 @@ def make_wikitext_optimizer(params, train_its):
                                **WIKITEXT_OPT_KW)
 
 def main():
+    import dill as pickle
+    out_path = '/tmp/lds.pkl'
     ret = calculate_lds(MODEL_SEED, DATA_SEED, TEST_SAMPLE, BS, DROP_FRAC,
                         LDS_SEED, make_loaders_and_data_weights, model_maker,
                         make_wikitext_optimizer)
-    print(ret)
+    with open(out_path, 'wb') as f:
+        pickle.dump(ret, f)
 
 if __name__ == '__main__':
     main()

@@ -1,8 +1,8 @@
 import jax
 from functools import partial
 import jax.numpy as jnp
-from jax_lm.metagradients.vjp import minibatch_func, async_iterator, replay_vjp
-from jax_lm.metagradients.utils import make_shardings
+from ..metagradients.vjp import minibatch_func, async_iterator, replay_vjp
+from ..metagradients.utils import make_shardings
 from tqdm import tqdm
 
 @jax.jit
@@ -70,36 +70,53 @@ def sample_loss_vjp_head(state, *, per_sample_loss, val_batcher, val_its):
         acc = minibatch_func(func, minibatches, acc=acc)
         n += batch.bs
 
-    from ipdb import set_trace as bp
-    from IPython import embed
     g, primal = jax.tree_util.tree_map(partial(safe_div, y=n), acc)
-    print('g:', g)
-    print('primal:', primal)
-    bp()
     print('>> VAL N IN PRIMAL:', n)
     assert len(acc) == 2
     return g, primal
 
+# def dstate_vjp_skeleton(losser0, get_grads, apply_grads, *, bs):
+#     eps = jnp.zeros((bs,))
+#     def new_get_grads(eps, state, batch):
+#         def new_losser(*args, **kwargs):
+#             return losser0(*args, **kwargs)
+
+#         return get_grads(state, batch, new_losser)
+
+#     return eps, new_get_grads, apply_grads
+
+def dstate_vjp_skeleton(losser0, get_grads, apply_grads, *, bs):
+    data_weights = losser0.keywords['data_weights']
+    eps = jnp.zeros(bs)
+    def new_get_grads(eps, state, batch):
+        def new_losser(*args, **kwargs):
+            # ixs, _, bsi = batch
+            # this_eps = eps[bsi]
+            # curr_keywords = losser0.keywords
+            # adjusted_weights = data_weights.at[ixs].add(this_eps)
+            # new_keywords = {k: v for k,v in curr_keywords.items()}
+            # new_keywords['data_weights'] = adjusted_weights
+            # new_losser0 = jax.tree_util.Partial(losser0.func, **new_keywords)
+            # return new_losser0(*args, **kwargs)
+            return losser0(*args, **kwargs)
+
+        return get_grads(state, batch, new_losser)
+
+    def new_apply_grads(eps, state, grads):
+        return apply_grads(state, grads)
+
+    return eps, new_get_grads, new_apply_grads
+
 # SKELETONS
 def example_loss_vjp_skeleton(losser0, get_grads, apply_grads, *, bs):
     data_weights = losser0.keywords['data_weights']
-    jax.debug.print('home-run: {dw}', dw=data_weights)
-    # eps = jnp.zeros(bs, device=jax.devices('gpu')[0])
-    print('errrrrroooooooooorrrrrrrrrrrrrrrrrrrrrrr')
     eps = jnp.zeros(bs)
     def new_get_grads(eps, state, batch):
         def new_losser(*args, **kwargs):
             ixs, _, bsi = batch
-            from ipdb import set_trace as bp
-            bp()
             this_eps = eps[bsi]
             curr_keywords = losser0.keywords
-            # old
-            # adjusted_weights = data_weights.at[ixs].add(this_eps+3)
-            # new
-            jax.debug.print('---{prefix}={dw}', prefix='dw', dw=data_weights)
-            adjusted_weights = data_weights.at[ixs].add(this_eps+3)
-            jax.debug.print('---{prefix}={dw}', prefix='adw', dw=adjusted_weights)
+            adjusted_weights = data_weights.at[ixs].add(this_eps)
             new_keywords = {k: v for k,v in curr_keywords.items()}
             new_keywords['data_weights'] = adjusted_weights
             new_losser0 = jax.tree_util.Partial(losser0.func, **new_keywords)

@@ -3,7 +3,6 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 import cupy
-import jax.tree_util
 import numpy as np
 
 def make_io_stream():
@@ -63,6 +62,12 @@ def to_single_device(x, put_device):
     # choose a random device
     x = jax.device_put(x, put_device)
     return x
+
+def dlpack_blocking_gpu2cpu(x):
+    stream = make_io_stream()
+    cpu_x, block_fn = dlpack_gpu2cpu(x, stream)
+    x, cpu_x = block_fn()
+    return cpu_x
 
 import numpy as np
 def dlpack_gpu2cpu(x, stream, replace_buffers=None):

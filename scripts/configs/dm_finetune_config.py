@@ -2,7 +2,8 @@ from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 
 
-def get_config(config_string="full,multimodal"):
+# def get_config(config_string="full,multimodal"): # old
+def get_config(config_string="full,language_conditioned"): # new
     mode, task = config_string.split(",")
     assert task in ["image_conditioned", "language_conditioned", "multimodal"]
     assert mode in ["full", "head_only", "head_mlp_only"]
@@ -16,23 +17,36 @@ def get_config(config_string="full,multimodal"):
     FINETUNING_KWARGS = {
         "name": "bridge_dataset",
         # "data_dir": "./tests/debug_dataset",
-        # "name": "bridge_dataset",
-        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/traj_data",
-        # "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:bridge_dataset_transform",
-        # "image_obs_keys": {"primary": "image_0", "wrist": None},
-        # "state_obs_keys": ["state", None],
 
-        # "name": "toto",
+        "data_dir": "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/train",
         # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/traj_data",
-        # "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:toto_dataset_transform",
-        # "image_obs_keys": {"primary": "image", "wrist": None},
-        # "state_obs_keys": ["state", None],
 
-        "name": "cmu_stretch",
-        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/data",
-        "data_dir": "/mnt/xfs/home/alaakh/store/oxe/traj_data",
-        "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:cmu_stretch_dataset_transform",
-        "image_obs_keys": {"primary": "image", "wrist": None},
+        "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:bridge_dataset_transform",
+        "image_obs_keys": {"primary": "image_0", "wrist": None},
+        "state_obs_keys": ["state", None],
+
+        "language_key": "language_instruction",
+        "action_proprio_normalization_type": "normal",
+        # All actions are relative deltas, except for the last one (gripper) which is absolute
+        # Specifying this is only necessary if you want to predict > 1 step into the future
+        "absolute_action_mask": [False, False, False, False, False, False, True],
+        # standardize_fn is dynamically loaded from a file
+        # for example: "experiments/kevin/custom_standardization_transforms.py:aloha_dataset_transform"
+        # If the default data loading speed is too slow, try these:
+        # "num_parallel_reads": 8,  # for reading from disk / GCS
+        # "num_parallel_calls": 16,  # for initial dataset construction
+    }
+
+    FINETUNING_VAL_KWARGS = {
+        "name": "bridge_dataset",
+        # "data_dir": "./tests/debug_dataset",
+        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/traj_data",
+        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/train_val_splits/train",
+        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/train_val_splits/val",
+        "data_dir": "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/val",
+
+        "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:bridge_dataset_transform",
+        "image_obs_keys": {"primary": "image_0", "wrist": None},
         "state_obs_keys": ["state", None],
 
         "language_key": "language_instruction",
@@ -62,20 +76,41 @@ def get_config(config_string="full,multimodal"):
     else:
         raise ValueError("Invalid mode")
 
-    max_steps = FieldReference(50000)
-    window_size = FieldReference(default=1)
+    # max_steps = FieldReference(50000)
+    max_steps = FieldReference(10_000)
+    # max_steps = FieldReference(5_000)
+    # max_steps = FieldReference(2_000)
+    # window_size = FieldReference(default=1) # old
+    window_size = FieldReference(default=2) # new
 
     config = dict(
         pretrained_path=placeholder(str),
         pretrained_step=placeholder(int),
-        batch_size=256,
-        mini_batch_size=64,
+
+        # num_workers=8,
+        # num_workers=32,
+        # num_workers=48,
+        num_workers=64,
+
+        batch_size=512,
+        mini_batch_size=128,
+        val_batch_size=16,
+        mini_val_batch_size=16,
         # batch_size=128,
         shuffle_buffer_size=10000,
         num_steps=max_steps,
+        bob_steps=100,
+        candidate_size=0.5,
+
+        # num_steps=30,
+        # bob_steps=2,
+        # candidate_size=0.01,
+
         log_interval=100,
-        eval_interval=5000,
-        save_interval=5000,
+        # eval_interval=5000,
+        # save_interval=5000,
+        eval_interval=int(0.05 * max_steps.get()),
+        save_interval=int(0.05 * max_steps.get()),
         # save_dir=placeholder(str),
         save_dir='/mnt/xfs/home/alaakh/src/octo_dir/octo/exps/debug',
         seed=42,
@@ -83,6 +118,7 @@ def get_config(config_string="full,multimodal"):
             project="octo_finetune", group=placeholder(str), entity=placeholder(str)
         ),
         dataset_kwargs=FINETUNING_KWARGS,
+        val_dataset_kwargs=FINETUNING_VAL_KWARGS,
         modality=task,
         finetuning_mode=mode,
         window_size=window_size,
@@ -91,7 +127,9 @@ def get_config(config_string="full,multimodal"):
                 name="cosine",
                 init_value=0.0,
                 peak_value=3e-4,
-                warmup_steps=2000,
+                # warmup_steps=2000,
+                warmup_steps=int(0.05 * max_steps.get()),
+                # warmup_steps=int(0.1 * max_steps.get()),
                 decay_steps=max_steps,
                 end_value=0.0,
             ),

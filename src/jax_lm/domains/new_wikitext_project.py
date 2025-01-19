@@ -52,25 +52,30 @@ def to_vjp(vjp_head, return_state=False, forward_only=False, drop_frac=None,
 from .generalized_svd import basis_for
 
 def main():
-    os.environ['DEBUG'] = '1'
-
     seed = 0
-    proj_dim = 1024
+    proj_dim = 8192 * 2 * 4
 
-    one_head = ('test_loss', {
-        'test_index': 0
-    })
+    # choose 20 random indices
+    rng = np.random.default_rng(seed)
+    # twenty_indices_of_256 = list(map(int, rng.choice(256, 20, replace=False)))
 
-    out_p = '/mnt/xfs/home/engstrom/scratch/generalized_scratch_dir_svd'
-    projectors = basis_for(to_vjp, out_p, proj_dim, seed, 1)
-    lowrank_vjp_with_lds(to_vjp, projectors, [one_head], out_p, 2)
+    def make_head(k):
+        return ('test_loss', {'test_index': int(k)})
+
+    basis_size = 1
+    keep_only_index = 0
+    one_head = [make_head(keep_only_index)]
+
+    out_p = '/mnt/xfs/home/engstrom/scratch/wikitext_scratch_svd_65k_keep0'
+    projectors = basis_for(to_vjp, out_p, proj_dim, seed, basis_size, 
+                           keep_only_index=keep_only_index)
+    lowrank_vjp_with_lds(to_vjp, projectors, one_head, out_p, num_trials=20)
 
 def main_randomized():
     os.environ['DEBUG'] = '1'
-
     seed = 0
     key = jax.random.PRNGKey(seed)
-    proj_dim = 1024
+    proj_dim = 8192 * 2
     linear_combo = np.array(jax.random.normal(key, (proj_dim,))).astype(np.float32)
 
     one_projector = ('random', {
@@ -83,7 +88,7 @@ def main_randomized():
         'test_index': 0
     })
 
-    out_p = '/mnt/xfs/home/engstrom/scratch/generalized_scratch_dir'
+    out_p = '/mnt/xfs/home/engstrom/scratch/generalized_scratch_dir_16384'
     lowrank_vjp_with_lds(to_vjp, [one_projector], [one_head], out_p, 2)
 
 if __name__ == '__main__':

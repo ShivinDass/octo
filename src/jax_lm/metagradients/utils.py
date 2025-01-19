@@ -12,11 +12,6 @@ from pathlib import Path
 from functools import cache
 
 def set_dtype(dty, determinism):
-    if determinism:
-        pass
-
-    print(f'>> Setting dtype={dty}, determinism={determinism}')
-
     if dty == 'float64':
         jax.config.update('jax_enable_x64', True)
         raise ValueError('float64 not supported')
@@ -32,10 +27,16 @@ def set_dtype(dty, determinism):
 @cache
 def make_shardings():
     num_devices = len(jax.devices('gpu'))
-    mesh = Mesh(mesh_utils.create_device_mesh((num_devices,)), 'batch')
-    sharding = NamedSharding(mesh, P('batch'))
-    replicated_sharding = NamedSharding(mesh, P())
-    return sharding, replicated_sharding
+    if num_devices > 1:
+        print('MAKING SHARDINGS FOR SINGLE DEVICE')
+        mesh = Mesh(mesh_utils.create_device_mesh((num_devices,)), 'batch')
+        sharding = NamedSharding(mesh, P('batch'))
+        replicated_sharding = NamedSharding(mesh, P())
+        return sharding, replicated_sharding
+    else:
+        print('MAKING SHARDINGS FOR SINGLE DEVICE')
+        sharding = jax.devices('gpu')[0]
+        return sharding, sharding
 
 class NotANumberError(Exception):
     pass
@@ -85,12 +86,51 @@ def safe_diff(x, y):
 
 @jax.jit
 def safe_add(x, y):
-    if x is None or x.dtype == jax.float0 or isinstance(x, int):
+    if hasattr(x, 'dtype'):
+        if x.dtype == jax.float0:
+            return x
+
+    if x is None:
+        return None
+
+    if y is None:
         return x
 
-    return x + y
+    try:
+        res = x + y
+    except:
+        import pdb; pdb.set_trace()
 
-@jax.jit
+    return res
+
+# @partial(jax.jit, donate_argnums=(1,))
+@partial(jax.jit)
+def add_trees_ignore_none(x, y):
+    def safe_add(x, y):
+        if x.dtype == jax.float0:
+            return x
+
+        if x is None:
+            return None
+
+        if y is None:
+            return x
+
+        try:
+            res = x + y
+        except:
+            import pdb; pdb.set_trace()
+
+        return res
+
+    # if x None then the acc is nothing so we just return y
+    if x is None:
+        return y
+
+    return jax.tree_util.tree_map(safe_add, x, y)
+
+# @partial(jax.jit, donate_argnums=(1,))
+@partial(jax.jit)
 def add_trees(x, y):
     def safe_add(x, y):
         if x.dtype == jax.float0:
@@ -121,6 +161,10 @@ class MinibatchedLoader():
     #    represents the minibatches from start_batch to end_batch (exclusive at end)
     def make_batch_iterator(self, start_batch, end_batch, sharding):
         raise NotImplementedError
+
+@jax.jit
+def safe_tree_add(x, y):
+    return jax.tree_util.tree_map(safe_add, x, y)
 
 class MiniBatchIterator:
     # minibatches: iterator of minibatches

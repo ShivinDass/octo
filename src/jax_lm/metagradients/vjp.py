@@ -9,8 +9,9 @@ try:
     jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 except AttributeError:
     pass
-CPU_DEV = jax.devices('cpu')[0]
 
+from ..metagradients.dlpack import dlpack_blocking_gpu2cpu
+from ..metagradients.utils import safe_tree_add
 import os
 import gc
 import time
@@ -19,8 +20,8 @@ from pathlib import Path
 import jax.numpy as jnp
 import numpy as np
 from tqdm import tqdm
-from functools import partial
 from ..metagradients.dlpack import dlpack_gpu2cpu, make_io_stream
+from functools import partial
 from ..metagradients.dataloading import REPLAYMinibatches
 jnp.set_printoptions(threshold=1)
 
@@ -30,8 +31,8 @@ from ..metagradients.utils import add_trees, make_shardings, safe_divide, \
 class NotANumberError(Exception):
     pass
 
-def make_save_iterations(train_its, serialize_k):
-    save_iterations = list(range(0, train_its, serialize_k)) + [train_its]
+def make_save_iterations(start_it, train_its, serialize_k):
+    save_iterations = list(range(int(start_it), int(train_its), serialize_k)) + [train_its]
     save_iterations = set(save_iterations)
     return save_iterations
 
@@ -42,12 +43,12 @@ def gpu_show():
         os.system('nvidia-smi')
 
 def replay_forward(saved_states, train_its, train_batcher, serialize_k,
-                   psl_train):
+                   psl_train, start_it):
     sharding, replicated_sharding = make_shardings()
-    state = jax.device_put(saved_states[0], replicated_sharding)
+    state = jax.device_put(saved_states[start_it], replicated_sharding)
 
-    iterator = tqdm(range(0, train_its))
-    save_iterations = make_save_iterations(train_its, serialize_k)
+    iterator = tqdm(range(start_it, train_its))
+    save_iterations = make_save_iterations(start_it, train_its, serialize_k)
 
     gpu_states = []
     old_cpu_states = None
@@ -60,7 +61,6 @@ def replay_forward(saved_states, train_its, train_batcher, serialize_k,
 
             # save to disk
             for i, cpu_state in old_cpu_states:
-                # saved_states[i] = cpu_state
                 saved_states.set(i, cpu_state, disk=True)
 
         # now move gpu_states to cpu
@@ -80,15 +80,13 @@ def replay_forward(saved_states, train_its, train_batcher, serialize_k,
         old_cpu_states = list(zip(gpu_state_indices, cpu_states))
         return [], old_cpu_states, block_fn
 
-    indices_by_batch = []
+    # indices_by_batch = []
 
-    batches = async_iterator(train_batcher, 0, train_its, 'train')
+    batches = async_iterator(train_batcher, start_it, train_its, 'train')
     for it in iterator:
         _, minibatches = next(batches)
-        state, batch_indices = functional_step(state, minibatches, psl_train,
-                                               return_indices=True)
-        batch_indices = jax.device_put(batch_indices, CPU_DEV)
-        indices_by_batch.append(batch_indices)
+        state = functional_step(state, minibatches, psl_train, return_indices=False)
+        # indices_by_batch.append(batch_indices)
 
         curr_it = it + 1
         if curr_it in save_iterations:
@@ -102,8 +100,8 @@ def replay_forward(saved_states, train_its, train_batcher, serialize_k,
                                                                     old_cpu_states,
                                                                     old_cpu_blocker)
     tup = flush_and_replace(gpu_states, old_cpu_states, old_cpu_blocker)
-    print(f'>> Done: trained from cache @ 0 -> it {train_its}')
-    return state, list(map(np.array, indices_by_batch))
+    print(f'>> Done: trained from cache @ {start_it} -> it {train_its}')
+    return state
 
 def async_iterator(batcher, s, e, part):
     iterator = batcher(s, e)
@@ -127,7 +125,8 @@ def async_iterator(batcher, s, e, part):
 def replay_vjp(*, state, train_batcher, val_batcher, train_its, val_its,
                psl_train, psl_test, vjp_skele, vjp_head, segment_size=20,
                forward_only=False, return_state=False, aux_datasets=None,
-               save_dired='/tmp/'):
+               save_dired='/tmp/', return_2nd_to_last_dstate=False,
+               per_state_skele=False):
     '''
     state0: initial state; includes step
     train_batcher: (s, e, sharding) -> Iterator[MiniBatchIterator]
@@ -139,13 +138,21 @@ def replay_vjp(*, state, train_batcher, val_batcher, train_its, val_its,
     cache_dir: where to save the intermediate states
     eval_every: how often to evaluate the model
     '''
+    if not per_state_skele:
+        state_to_vjp_skele = lambda state: vjp_skele
+    else:
+        state_to_vjp_skele = vjp_skele
+
     assert aux_datasets is not None
     gpu_show()
     debug_mode = bool(os.environ.get('DEBUG', False))
 
     sharding, replicated_sharding = make_shardings()
+    state = jax.device_put(state, replicated_sharding)
     val_batcher = jax.tree_util.Partial(val_batcher, sharding=sharding)
     train_batcher = jax.tree_util.Partial(train_batcher, sharding=sharding)
+    for k, v in aux_datasets.items():
+        aux_datasets[k] = (jax.tree_util.Partial(v[0], sharding=sharding), v[1])
 
     saved_states_path = Path(save_dired) / f'{USER}_replay_states'/ str(uuid4())
     saved_states_path.mkdir(parents=True)
@@ -157,11 +164,9 @@ def replay_vjp(*, state, train_batcher, val_batcher, train_its, val_its,
     if len(saved_deps) > 0 and len(saved_states) == 0:
         raise ValueError('Cannot start from deps without states')
 
-    s = time.time()
-    curr_it = int(state.opt_state.count)
-    if not curr_it in saved_states:
-        # saved_states[curr_it] = state
-        saved_states.set(curr_it, state)
+    start_it = int(state.opt_state.count)
+    if not start_it in saved_states:
+        saved_states.set(start_it, state)
 
     if segment_size is None:
         segment_size = int(train_its**0.5)
@@ -175,16 +180,15 @@ def replay_vjp(*, state, train_batcher, val_batcher, train_its, val_its,
     evaler = partial(eval_model, val_batcher=val_batcher, val_its=val_its,
                      per_sample_loss=psl_test)
 
-    final_state, batch_indices = replay_forward(saved_states, train_its,
-                                                train_batcher, segment_size,
-                                                psl_train)
+    final_state = replay_forward(saved_states, train_its, train_batcher,
+                                 segment_size, psl_train, start_it)
 
     val_loss = evaler(state=final_state, limited=debug_mode)
 
     # make list of start, end pairs
-    save_iterations = make_save_iterations(train_its, segment_size)
+    save_iterations = make_save_iterations(start_it, train_its, segment_size)
     save_iterations = sorted(list(save_iterations))
-    assert save_iterations[0] == 0
+    assert save_iterations[0] == start_it
     all_segments = list(zip(save_iterations[:-1], save_iterations[1:]))[::-1]
 
     state_cotangents, primal = vjp_head(final_state)
@@ -207,8 +211,8 @@ def replay_vjp(*, state, train_batcher, val_batcher, train_its, val_its,
     } | {k: float(v) for k, v in aux_losses.items()}
 
     print('>> All losses:', final_return)
-    # final_state = jax.device_put(final_state, CPU_DEV) if return_state else None
-    final_return['batch_indices'] = batch_indices
+    # final_return['batch_indices'] = batch_indices
+    final_state = dlpack_blocking_gpu2cpu(final_state)
 
     if forward_only:
         if return_state:
@@ -223,18 +227,29 @@ def replay_vjp(*, state, train_batcher, val_batcher, train_its, val_its,
     # Jf_{okaz_i} = Jf_{i * k - 1} ... Jf_{(i - 1) * k}
     print('>> Remaining segments', segments)
 
+    state_cotangents_to_save = []
+    if return_2nd_to_last_dstate:
+        state_cotangents_to_save = [start_it + 1]
+    else:
+        state_cotangents_to_save = []
+
+    all_saved_state_cotangents = {}
+
     prev_start = None
+    all_batch_indices = {}
     for start, end in tqdm(segments, desc='Okazaki stages'):
         assert end > start
         ret = replay_stage(final_i=end, start_i=start,
                            train_batcher=train_batcher,
                            psl_train=psl_train,
-                           vjp_skele=vjp_skele,
+                           state_to_vjp_skele=state_to_vjp_skele,
                            state_cotangents=state_cotangents,
                            saved_states=saved_states,
-                           stage_num=f'{end}/{train_its}')
+                           stage_num=f'{end}/{train_its}',
+                           state_cotangents_to_save=state_cotangents_to_save)
 
-        state_cotangents, eps_cotangents = ret
+        state_cotangents, eps_cotangents, stored_state_cotangents, batch_indices = ret
+        all_saved_state_cotangents.update(stored_state_cotangents)
 
         # eps_cotangents: dictionary from i -> vector of eps_i
         mini = 10
@@ -246,13 +261,16 @@ def replay_vjp(*, state, train_batcher, val_batcher, train_its, val_its,
         avg = jnp.absolute(values).mean()
 
         print(f'>> {end} -> {start}: {mini=:.6f} {maxi=:.6f} {avg=:.6f}')
-        on_cpu = jax.device_put(eps_cotangents, CPU_DEV)
+        on_cpu = dlpack_blocking_gpu2cpu(eps_cotangents)
         on_cpu = {k:np.array(v) for k, v in on_cpu.items()}
+
+        batch_indices = dlpack_blocking_gpu2cpu(batch_indices)
+        batch_indices = {k: np.array(v) for k, v in batch_indices.items()}
+        all_batch_indices.update(batch_indices)
 
         # TODO: if we want to do LR/WD we need to fix this part to be more general
         on_cpu = {k:v for k, v in on_cpu.items()}
         on_cpu_shifted = {(k - start): v for k, v in on_cpu.items()}
-        # saved_dstates[start] = state_cotangents
         saved_dstates.set(start, state_cotangents)
         if not prev_start is None:
             del saved_dstates[prev_start]
@@ -266,13 +284,16 @@ def replay_vjp(*, state, train_batcher, val_batcher, train_its, val_its,
     assert len(saved_deps) >= len(all_segments)
 
     final_return['deps'] = saved_deps
+    final_return['batch_indices'] = all_batch_indices
     if return_state:
         final_return['final_state'] = final_state
 
+    final_return['dstates'] = all_saved_state_cotangents
     return final_return
 
-def replay_stage(final_i, start_i, train_batcher, psl_train, vjp_skele,
-                 state_cotangents, saved_states, stage_num):
+def replay_stage(final_i, start_i, train_batcher, psl_train, state_to_vjp_skele,
+                 state_cotangents, saved_states, stage_num,
+                 state_cotangents_to_save=[]):
     assert final_i > start_i
     assert start_i in saved_states
 
@@ -339,6 +360,8 @@ def replay_stage(final_i, start_i, train_batcher, psl_train, vjp_skele,
     minibatches = batch.get_minibatches('meta')
 
     gc.collect()
+    dstates_saved = {}
+    all_batch_indices = {}
     for back_it in tqdm(backward_its, desc=f'|stage={stage_num} | Backward'):
         assert back_it < last_prev_seen_state
         if back_it != start_i:
@@ -350,15 +373,19 @@ def replay_stage(final_i, start_i, train_batcher, psl_train, vjp_skele,
         else:
             nbatch, nminibatches, nstate = None, None, None
 
-        eps_cotangents, state_cotangents = backward_step(minibatches, state,
-                                                         state_p1,
-                                                         state_cotangents,
-                                                         vjp_skele,
-                                                         psl_train=psl_train)
+        vjp_skele = state_to_vjp_skele(state)
+        ret = backward_step(minibatches, state, state_p1, state_cotangents,
+                            vjp_skele, psl_train=psl_train)
 
-        jax.block_until_ready((eps_cotangents, state_cotangents))
+        eps_cotangents, state_cotangents, batch_indices = ret
+
+        jax.block_until_ready((eps_cotangents, state_cotangents, batch_indices))
+        if back_it in state_cotangents_to_save:
+            # assert back_it == int(state.opt_state.count)
+            dstates_saved[back_it] = state_cotangents
 
         all_eps_cotangents[back_it] = eps_cotangents
+        all_batch_indices[back_it] = batch_indices
         state, batch, state_p1, minibatches = nstate, nbatch, state, nminibatches
 
     all_saved_states = list(saved_states.keys())
@@ -366,7 +393,7 @@ def replay_stage(final_i, start_i, train_batcher, psl_train, vjp_skele,
         if saved_i > start_i:
             del saved_states[saved_i]
 
-    return state_cotangents, all_eps_cotangents
+    return state_cotangents, all_eps_cotangents, dstates_saved, all_batch_indices
 
 def pytree_isnan(pytree):
     flat, _ = jax.tree_util.tree_flatten(pytree)
@@ -399,6 +426,8 @@ def zero_dstate(dstate):
 
     return GLOBAL_DSTATE_ZERO
 
+from ..metagradients.utils import add_trees_ignore_none
+
 def backward_step(batch, state, next_state, dstate, vjp_skele,
                   psl_train):
     vjp_skele = jax.tree_util.Partial(vjp_skele)
@@ -413,27 +442,39 @@ def backward_step(batch, state, next_state, dstate, vjp_skele,
                                              dgrads=dgrads,
                                              vjp_skele=vjp_skele,
                                              per_sample_loss=psl_train)
-
+    dstate_with_nones = jax.tree_util.tree_map(lambda x: None, dstate)
     def mb_bck_with_zeros(mb):
         num_nz = count_nz(psl_train, mb)
         if num_nz == 0.0:
             this_deps, = minibatched_backward_no_state(mb)
-            res = this_deps, zero_dstate(dstate)
+            res = this_deps, dstate_with_nones # zero_dstate(dstate)
         else:
             res = minibatched_backward(mb)
 
         return (num_nz,) + res
 
-    count, deps2, dstate2 = minibatch_func(mb_bck_with_zeros, batch)
-    deps2, dstate2 = jax.tree_util.tree_map(partial(safe_divide, y=count), (deps2, dstate2))
-    deps = jax.tree_util.tree_map(safe_add, deps, deps2)
-    dstate = jax.tree_util.tree_map(safe_add, dstate, dstate2)
-    return deps, dstate
+    ret, batch_indices = minibatch_func(mb_bck_with_zeros, batch, return_indices=True,
+                                        agg_fn=add_trees_ignore_none)
+    try:
+        # count, deps2, dstate2 = ret
+        _, deps2, dstate2 = ret
+    except:
+        import pdb; pdb.set_trace()
+
+    # import pdb; pdb.set_trace()
+    # PREV HAD THIS
+    # deps2, dstate2 = jax.tree_util.tree_map(partial(safe_divide, y=count), (deps2, dstate2))
+    # deps2, dstate2 = deps2, d
+    # deps = jax.tree_util.tree_map(safe_add, deps, deps2)
+    # dstate = jax.tree_util.tree_map(safe_add, dstate, dstate2)
+    deps = safe_tree_add(deps, deps2)
+    dstate = safe_tree_add(dstate, dstate2)
+    return deps, dstate, batch_indices
 
 def make_forwards(vjp_skele, per_sample_loss):
     get_grads, apply_grads = factored_functional_step(use_jit=False)
     eps, get_grads, apply_grads = vjp_skele(per_sample_loss, get_grads,
-                                                    apply_grads)
+                                            apply_grads)
     return eps, get_grads, apply_grads
 
 def take_vjp(fn, cotangents, *args):
@@ -531,7 +572,7 @@ def batch_for_state(state, train_batch_maker):
 
 def _grads_for_batch(batch, statek, per_sample_loss):
     def losser(params):
-        losses = per_sample_loss(params, batch, divisor=1.0)
+        losses = per_sample_loss(params, batch)
         return jnp.sum(losses)
 
     grads = jax.grad(losser)(statek.params)
@@ -539,24 +580,29 @@ def _grads_for_batch(batch, statek, per_sample_loss):
 
 grads_for_batch = jax.jit(_grads_for_batch)
 
+@partial(jax.jit, donate_argnums=(2,))
+def func_and_acc(f, accumulate, acc, x):
+    res = f(x)
+    return accumulate(acc, res)
+
 def minibatch_func(func, minibatches, *, acc=None, sharding=None, agg_fn=None,
                    do_tqdm=False, return_indices=False):
-    if sharding is None:
-        sharding, _ = make_shardings()
-
+    sharding, replicated_sharding = make_shardings()
     bs = minibatches.bs
     bsi = jnp.arange(bs)
 
     def format_minibatch(mb, s):
         try:
-            indices, (x, y) = mb # .indices, (mb.x, mb.y)
+            indices, (x, y) = mb
         except:
             print(mb)
-            import ipdb; ipdb.set_trace()
+            import pdb; pdb.set_trace()
 
         e = s + len(indices)
         mb_bsi = bsi[s:e]
-        return jax.device_put((indices, (x, y), mb_bsi), sharding)
+        num_devices = len(replicated_sharding.mesh.device_ids) if hasattr(replicated_sharding, 'mesh') else 1
+        this_sharding = sharding if len(indices) % num_devices == 0 else replicated_sharding
+        return jax.device_put((indices, (x, y), mb_bsi), this_sharding)
 
     total_seen = 0
     minibatches = iter(minibatches)
@@ -577,7 +623,7 @@ def minibatch_func(func, minibatches, *, acc=None, sharding=None, agg_fn=None,
         try:
             next_minibatch = format_minibatch(next(minibatches), total_seen)
         except StopIteration:
-            assert total_seen == bs
+            # assert total_seen == bs
             next_minibatch = None
 
         grads = func(minibatch)
@@ -588,7 +634,7 @@ def minibatch_func(func, minibatches, *, acc=None, sharding=None, agg_fn=None,
             except:
                 import ipdb; ipdb.set_trace()
         else:
-            acc = agg_fn(acc, grads)
+            acc = grads if acc is None else agg_fn(acc, grads)
 
         if do_tqdm:
             pbar.update(len(minibatch[0]))
@@ -596,7 +642,7 @@ def minibatch_func(func, minibatches, *, acc=None, sharding=None, agg_fn=None,
         if next_minibatch is None:
             break
 
-    assert total_seen == bs
+    # assert total_seen == bs
     if return_indices:
         all_indices = jnp.concatenate(all_indices, axis=0)
         return acc, all_indices
@@ -642,15 +688,14 @@ def factored_functional_step(*, use_jit=True, lr_factor=get_one(),
             ret = minibatch_func(factored_batch_to_grads, batch,
                                  return_indices=return_indices)
             if return_indices:
-                (num_samples, grads_acc), indices = ret
+                (_, grads_acc), indices = ret
             else:
-                num_samples, grads_acc = ret
+                _, grads_acc = ret
 
-            if num_samples == 0:
-                raise ValueError('No samples in batch')
-
-            grads_acc = jax.tree_util.tree_map(partial(safe_divide, y=num_samples),
-                                     grads_acc)
+            # if _ == 0:
+            #     raise ValueError('No samples in batch')
+            # grads_acc = jax.tree_util.tree_map(partial(safe_divide, y=batchl_+),
+            #                          grads_acc)
         else:
             grads_acc = batch_to_grads(batch)
 

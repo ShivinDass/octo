@@ -10,7 +10,7 @@ def rademacher(*args, **kwargs):
     try:
         unif = jax.random.bernoulli(*args, **kwargs)
     except:
-        import ipdb; ipdb.set_trace()
+        import pdb; pdb.set_trace()
     return (2 * unif - 1).astype(dtype)
 
 @partial(jax.jit, static_argnames=['d'])
@@ -23,7 +23,7 @@ def tree_project(seed, tree, seed2=None, d=1):
     implicit_mode = seed2 is not None
 
     if implicit_mode:
-        key2 = jax.random.PRNGKey(seed2)
+        key2 = jax.random.PRNGKey(seed2) 
 
     def random_project_and_reduce(cum, x):
         nonlocal key
@@ -80,7 +80,7 @@ def tree_project_svd(seed, tree, seed2=None, d=1):
     implicit_mode = seed2 is not None
 
     if implicit_mode:
-        key2 = jax.random.PRNGKey(seed2)
+        key2 = jax.random.PRNGKey(seed2) 
 
     def random_project_and_reduce(cum, x):
         nonlocal key

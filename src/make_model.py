@@ -1,6 +1,7 @@
 import imp
 import os
 import types
+import json
 from functools import cache
 from absl import app, flags
 import flax
@@ -8,6 +9,7 @@ import jax
 from fnmatch import fnmatch
 from ml_collections import config_flags, ConfigDict
 import tensorflow as tf
+import numpy as np
 
 from octo.data.dataset import make_single_dataset
 from octo.model.octo_model import OctoModel
@@ -35,8 +37,11 @@ from IPython import embed
 import flags_config
 FLAGS = flags.FLAGS
 
+from typing import Callable
+
 # @cache
-def make_model():
+def make_model(data_batcher: Callable):
+
     # initialize_compilation_cache()
     # prevent tensorflow from using GPU memory since it's only used for data loading
     tf.config.set_visible_devices([], "GPU")
@@ -71,76 +76,18 @@ def make_model():
         text_processor = ModuleSpec.instantiate(config["text_processor"])()
     ############################################
 
-    def process_batch(batch):
-        batch = process_text(batch, text_processor)
-        del batch["dataset_name"]
-        return batch
+    for batch in data_batcher(0, 1, None):
+        example_batch = batch.batch
+        break
 
-    # load standardize_fn from `path/to/file.py:fn_name` format
-    if (
-        standardize_fn := FLAGS.config["dataset_kwargs"].get("standardize_fn", None)
-    ) is not None:
-
-        if isinstance(standardize_fn, str):
-            path, name = standardize_fn.split(":")
-            # imp is deprecated, but it's also what ml_collections uses
-            standardize_fn = getattr(imp.load_source("standardize_fn", path), name)
-            del FLAGS.config["dataset_kwargs"]["standardize_fn"]
-            FLAGS.config["dataset_kwargs"]["standardize_fn"] = standardize_fn
-
-        elif isinstance(standardize_fn, types.FunctionType):
-            standardize_fn = FLAGS.config["dataset_kwargs"]["standardize_fn"]
-
-        else:
-            raise ValueError
-
-    ############################################
-    ########## get tfrecords iterator ##########
-    ############################################
-
-    print('Creating dataset')
-    os.environ['TF_DETERMINISTIC_OPS'] = '1'
-    tf.random.set_seed(FLAGS.config.seed)
-    # create dataset object
-    dataset = make_single_dataset(
-        FLAGS.config.dataset_kwargs,
-        traj_transform_kwargs=FLAGS.config.traj_transform_kwargs,
-        frame_transform_kwargs=FLAGS.config.frame_transform_kwargs,
-        train=True,
-        shuffle=False,
-        num_parallel_calls=1,
-        num_parallel_reads=1,
+    ds_stat_path = os.path.join(
+        FLAGS.config.dataset_kwargs.data_dir,
+        FLAGS.config.dataset_kwargs.name,
+        'dataset_statistics.json'
     )
-    dataset_statistics = dataset.dataset_statistics
-    dataset = dataset#.cache()
-    dataset.dataset_statistics = dataset_statistics
 
-    print('Collecting unique indices')
-    print('###########################')
-    print('Need to fix this at the end')
-    print('###########################')
-    unique_indices = 1_000 * [0]
-    # unique_indices = set()
-    # one_time_iter = (
-    #     dataset
-    #     .unbatch()
-    #     .batch(FLAGS.config.batch_size)
-    #     .prefetch(buffer_size=tf.data.AUTOTUNE)
-    #     .iterator()
-    # )
-    # for el in one_time_iter:
-    #     unique_indices |= set(el['index'])
-
-    data_iterator = (
-        dataset.repeat()
-        .unbatch()
-        .shuffle(FLAGS.config.shuffle_buffer_size, seed=FLAGS.config.seed)
-        .batch(FLAGS.config.batch_size)
-        .prefetch(buffer_size=tf.data.AUTOTUNE)
-        .iterator()
-    )
-    data_iterator = map(process_batch, data_iterator)
-    example_batch = next(data_iterator)
+    with open(ds_stat_path, 'r') as f:
+       dataset_statistics = json.load(f)
 
     #########
     #
@@ -154,7 +101,7 @@ def make_model():
         example_batch,
         text_processor,
         rng=init_rng,
-        dataset_statistics=dataset.dataset_statistics,
+        dataset_statistics=dataset_statistics,
     )
     merged_params = merge_params(model.params, pretrained_model.params)
     model = model.replace(params=merged_params)

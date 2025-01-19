@@ -2,7 +2,8 @@ from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 
 
-def get_config(config_string="full,multimodal"):
+# def get_config(config_string="full,multimodal"):
+def get_config(config_string="full,language_conditioned"):
     mode, task = config_string.split(",")
     assert task in ["image_conditioned", "language_conditioned", "multimodal"]
     assert mode in ["full", "head_only", "head_mlp_only"]
@@ -14,8 +15,12 @@ def get_config(config_string="full,multimodal"):
     # and second image key should be the wrist view (None if not used)
 
     FINETUNING_KWARGS = {
+        # "name": "bridge_dataset",
+        # "data_dir": "./tests/debug_dataset",
+
         "name": "bridge_dataset",
-        "data_dir": "./tests/debug_dataset",
+        "data_dir": "/mnt/xfs/home/alaakh/store/oxe/traj_data",
+
         "image_obs_keys": {"primary": "image_0", "wrist": None},
         "state_obs_keys": ["state", None],
         "language_key": "language_instruction",
@@ -47,7 +52,8 @@ def get_config(config_string="full,multimodal"):
         raise ValueError("Invalid mode")
 
     max_steps = FieldReference(50000)
-    window_size = FieldReference(default=1)
+    # window_size = FieldReference(default=1)
+    window_size = FieldReference(default=2)
 
     config = dict(
         pretrained_path=placeholder(str),

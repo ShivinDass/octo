@@ -52,6 +52,9 @@ flags.DEFINE_bool("debug", False, "Debug config (no wandb logging)")
 default_config_file = os.path.join(
     os.path.dirname(__file__), "configs/finetune_config.py"
 )
+# default_config_file = os.path.join(
+#     "/mnt/xfs/home/alaakh/src/octo_dir/octo/scripts/configs/dm_finetune_config.py"
+# )
 config_flags.DEFINE_config_file(
     "config",
     default_config_file,
@@ -200,6 +203,27 @@ def main(_):
     )
     train_data_iter = map(process_batch, train_data_iter)
     example_batch = next(train_data_iter)
+
+    # bp()
+    from tqdm import tqdm
+    from flatten_dict import flatten, unflatten
+
+    i = 0
+    # for item in dataset:
+    for item in train_data_iter:
+        item_flat = flatten(item, 'dot')
+        for k, v in item_flat.items():
+            try:
+                print(k, ':', v.numpy().dtype, 'and', v.numpy().shape)
+            except:
+                print(k, ':', v.dtype, 'and', v.shape)
+        print()
+        if i > 5:
+            break
+        i += 1
+
+    bp()
+    error
 
     #########
     #
