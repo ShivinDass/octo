@@ -1,0 +1,204 @@
+from typing import Iterator, Tuple, Any
+import os
+import glob
+import h5py
+import numpy as np
+import tensorflow as tf
+import tensorflow_datasets as tfds
+import tensorflow_hub as hub
+import cv2
+from tqdm import tqdm
+
+HORIZON=50
+DATA_DIR = '/mnt/hdd2/libero/'
+
+def chunk_traj(traj, chunk_size):
+    actions = traj['actions'][:]
+    data_size = actions.shape[0]
+
+    for i in range(0, data_size-chunk_size, chunk_size):
+        yield (i, i+chunk_size)
+
+    if i + chunk_size < data_size:
+        # print(data_size-chunk_size, data_size)
+        yield (data_size-chunk_size, data_size)
+
+class Libero90Horizon(tfds.core.GeneratorBasedBuilder):
+    """DatasetBuilder for example dataset."""
+
+    VERSION = tfds.core.Version('0.1.0')
+    RELEASE_NOTES = {
+      '0.1.0': 'Initial release.',
+    }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # self._embed = hub.load("https://tfhub.dev/google/universal-sentence-encoder-large/5")
+        self.traj_index = 0
+
+    def _info(self) -> tfds.core.DatasetInfo:
+        """Dataset metadata (homepage, citation,...)."""
+        return self.dataset_info_from_configs(
+            features=tfds.features.FeaturesDict({
+                'steps': tfds.features.Dataset({
+                    'observation': tfds.features.FeaturesDict({
+                        'image': tfds.features.Image(
+                            shape=(128, 128, 3),
+                            dtype=np.uint8,
+                            encoding_format='png',
+                            doc='Main camera RGB observation.',
+                        ),
+                        'wrist_image': tfds.features.Image(
+                            shape=(128, 128, 3),
+                            dtype=np.uint8,
+                            encoding_format='png',
+                            doc='Wrist camera RGB observation.',
+                        ),
+                        'state': tfds.features.Tensor(
+                            shape=(8,),
+                            dtype=np.float32,
+                            doc='Robot state, consists of [7x robot eef position and quaternion, '
+                                '1x gripper openness].',
+                        )
+                    }),
+                    'action': tfds.features.Tensor(
+                        shape=(7,),
+                        dtype=np.float32,
+                        doc='Robot action, consists of [3x cartesian position, 3x cartesian rotation,'
+                            '1x gripper open/close.',
+                    ),
+                    'discount': tfds.features.Scalar(
+                        dtype=np.float32,
+                        doc='Discount if provided, default to 1.'
+                    ),
+                    'reward': tfds.features.Scalar(
+                        dtype=np.float32,
+                        doc='Reward if provided, 1 on final step for demos.'
+                    ),
+                    'is_first': tfds.features.Scalar(
+                        dtype=np.bool_,
+                        doc='True on first step of the episode.'
+                    ),
+                    'is_last': tfds.features.Scalar(
+                        dtype=np.bool_,
+                        doc='True on last step of the episode.'
+                    ),
+                    'is_terminal': tfds.features.Scalar(
+                        dtype=np.bool_,
+                        doc='True on last step of the episode if it is a terminal step, True for demos.'
+                    ),
+                    'language_instruction': tfds.features.Text(
+                        doc='Language Instruction.'
+                    ),
+                    # 'language_embedding': tfds.features.Tensor(
+                    #     shape=(512,),
+                    #     dtype=np.float32,
+                    #     doc='Kona language embedding. '
+                    #         'See https://tfhub.dev/google/universal-sentence-encoder-large/5'
+                    # ),
+                    'index': tfds.features.Tensor(
+                        shape=(1,),
+                        dtype=np.int32,
+                        doc='Index of the trajectory in the dataset.'
+                    )
+                }),
+                'episode_metadata': tfds.features.FeaturesDict({
+                    'task_name': tfds.features.Text(
+                        doc='Name of the task.'
+                    ),
+                    'demo_id': tfds.features.Text(
+                        doc='Unique ID of the demo.'
+                    ),
+                    'chunk_idxs': tfds.features.Tensor(
+                        shape=(2,),
+                        dtype=np.int32,
+                        doc='Start and end index of the chunk in the original trajectory.'
+                    )
+                }),
+            }))
+
+    def _split_generators(self, dl_manager: tfds.download.DownloadManager):
+        """Define data splits."""
+        return {
+            'train': self._generate_examples(source_dir=os.path.join(DATA_DIR, 'libero_90')),
+            # 'val': self._generate_examples(path='/home/shivin/foundation_models/data/easy_pick_dataset/data_0_to_39.h5', train=False),
+        }
+
+    def _generate_examples(self, source_dir) -> Iterator[Tuple[str, Any]]:
+        """Generator of examples for each split."""
+
+        def _parse_example(demo, demo_id, chunk_idxs, task_name):
+            # TODO: the lang string needs to be fixed
+            language_instruction = task_name.split('SCENE')[1][2:]
+            language_instruction = " ".join(language_instruction.split('_')[:-1])
+            print(self.traj_index, language_instruction, '-', demo_id)
+
+            start_idx, end_idx = chunk_idxs
+
+            # load raw data --> this should change for your dataset
+            
+            actions = demo['actions'][start_idx:end_idx].astype(np.float32)
+            print(actions.shape)
+            actions[:, -1] = (1 - actions[:, -1])/2
+            data_len = actions.shape[0]
+
+            primary_image = np.flip(demo['obs']['agentview_rgb'][start_idx:end_idx].astype(np.uint8), axis=1)
+            wrist_image = np.flip(demo['obs']['eye_in_hand_rgb'][start_idx:end_idx].astype(np.uint8), axis=1)
+            ee_pos = demo['obs']['ee_pos'][start_idx:end_idx].astype(np.float32)
+            ee_ori = demo['obs']['ee_ori'][start_idx:end_idx].astype(np.float32)
+            gripper_states = demo['obs']['gripper_states'][start_idx:end_idx][:, :1].astype(np.float32)
+            states = np.concatenate([ee_pos, ee_ori, np.zeros((data_len, 1), dtype=np.float32), gripper_states], axis=-1)
+
+            episode = []
+            # language_embedding = self._embed([language_instruction])[0].numpy()
+            for i in range(data_len):
+                # compute Kona language embedding
+                
+                episode.append({
+                    'observation': {
+                        'image': primary_image[i],
+                        'wrist_image': wrist_image[i],
+                        'state': states[i],
+                    },
+                    'action': actions[i],
+                    'discount': 1.0,
+                    'reward': float(i == (data_len - 1)),
+                    'is_first': i == 0,
+                    'is_last': i == (data_len - 1),
+                    'is_terminal': i == (data_len - 1),
+                    'language_instruction': language_instruction,
+                    # 'language_embedding': language_embedding,
+                    'index': np.array([self.traj_index], dtype=np.int32),
+                })
+
+            # cv2.imwrite('im.png', episode[0]['observation']['image'])
+            # create output data sample
+            sample = {
+                'steps': episode,
+                'episode_metadata': {
+                    'demo_id': demo_id,
+                    'chunk_idxs': np.array(chunk_idxs, dtype=np.int32),
+                    'task_name': task_name,
+                }
+            }
+
+            # if you want to skip an example for whatever reason, simply return None
+            return self.traj_index, sample
+
+        task_list = sorted(os.listdir(source_dir))
+        for task in task_list:
+            task_name = task.split('.')[0]
+            # create list of all examples
+            f = h5py.File(os.path.join(source_dir, task), 'r')
+            demo_data = f['data']
+
+            # for smallish datasets, use single-thread parsing
+            demo_ids = sorted(list(demo_data.keys()))
+            for demo_id in demo_ids:
+                # slice data into horizon chunks
+                demo = demo_data[demo_id]     
+                for chunk_idxs in chunk_traj(demo, 50):
+                    yield _parse_example(demo, demo_id, chunk_idxs, task_name)
+                    self.traj_index += 1
+
+            f.close()
