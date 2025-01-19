@@ -9,7 +9,7 @@ import tensorflow_hub as hub
 import cv2
 from tqdm import tqdm
 
-HORIZON=50
+HORIZON=30
 DATA_DIR = '/mnt/hdd2/libero/'
 
 def chunk_traj(traj, chunk_size):
