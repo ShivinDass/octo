@@ -87,6 +87,13 @@ def apply_trajectory_transforms(
                 tf.math.abs(x["observation"]["proprio"]) <= max_proprio
             )
         )
+    
+    # example of filtering by index
+    dataset = dataset.filter(
+        lambda x: tf.reduce_any(
+            tf.logical_and(x['index'] < 200716, x['index'] > 200448)
+        )
+    )
 
     # marks which entires of the observation and task dicts are padding
     dataset = dataset.traj_map(traj_transforms.add_pad_mask_dict, num_parallel_calls, deterministic=True)
