@@ -80,12 +80,15 @@ def get_config(config_string="full,language_conditioned"): # new
     max_steps = FieldReference(10_000)
     # max_steps = FieldReference(5_000)
     # max_steps = FieldReference(2_000)
+    # max_steps = FieldReference(100)
     # window_size = FieldReference(default=1) # old
     window_size = FieldReference(default=2) # new
 
     config = dict(
         pretrained_path=placeholder(str),
         pretrained_step=placeholder(int),
+        job_id=placeholder(int),
+        folder_name=placeholder(str),
 
         # num_workers=8,
         # num_workers=32,
@@ -99,8 +102,11 @@ def get_config(config_string="full,language_conditioned"): # new
         # batch_size=128,
         shuffle_buffer_size=10000,
         num_steps=max_steps,
+        # bob_steps=10,
         bob_steps=100,
-        candidate_size=0.5,
+        # bob_steps=150,
+        # bob_steps=200,
+        candidate_size=1,
 
         # num_steps=30,
         # bob_steps=2,

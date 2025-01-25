@@ -1,8 +1,11 @@
 import os
 import gc
 import jax
+import pickle
+import jax.numpy as jnp
 import flax
 import numpy as np
+import dill
 from copy import deepcopy
 from tqdm import tqdm
 import tensorflow as tf
@@ -43,85 +46,6 @@ EPS = 1.0000000000000001e-11
 SEED_SPACING = 100000
 
 # os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
-
-# def lds_for_run(y0, num_datapoints, drop_frac, lds_seed, grad, data_weights,
-def lds_for_run(y0, num_datapoints, num_drop, lds_seed, grad, data_weights,
-                vjp_kw, num_trials=20):
-
-    ys = [y0]
-    y_hats = [y0]
-
-    candidate_grad = grad[1_000_000:]
-    candidate_samples = 1_000_000 + np.where(candidate_grad != 0)[0]
-    # num_leave_out = int(num_datapoints * drop_frac)
-    # num_leave_out = int(len(candidate_samples) * drop_frac)
-    num_leave_out = num_drop
-    rng = np.random.default_rng(lds_seed + SEED_SPACING)
-    all_drop_indices = []
-    for _ in range(num_trials):
-        # drop_indices = rng.choice(num_datapoints, num_leave_out, replace=False)
-        drop_indices = rng.choice(candidate_samples, num_leave_out, replace=False)
-        all_drop_indices.append(drop_indices)
-        # this_data_weights = data_weights.at[drop_indices].set(0)
-        this_data_weights = data_weights.at[drop_indices].set(1)
-        this_jvp_kw = {k: v for k, v in vjp_kw.items()}
-        this_jvp_kw.update(dict(
-            data_weights=this_data_weights,
-            forward_only=True
-        ))
-
-        # ret = vjp_lm(**this_jvp_kw)
-        ret = vjp_robodm(**this_jvp_kw)
-        ys.append(float(ret['primal']))
-
-        y_hat = y0 + grad @ (this_data_weights - data_weights)
-        y_hats.append(float(y_hat))
-
-    ys = np.array(ys)
-    y_hats = np.array(y_hats)
-
-    sr = spearmanr(ys, y_hats)
-    pr = pearsonr(ys, y_hats)
-    print("Spearman:", sr)
-    print("Pearson:", pr)
-
-    ret = dict(
-        sr=sr,
-        pr=pr,
-        ys=ys,
-        y_hats=y_hats,
-        all_drop_indices=all_drop_indices
-    )
-
-    # return sr, pr, y_hats, ys, all_drop_indices
-    return ret
-
-def test_model_improvement(y0,
-                           num_datapoints,
-                           num_drop,
-                           lds_seed,
-                           grad,
-                           data_weights,
-                           vjp_kw,
-                           num_trials=20):
-
-    ys = [y0]
-    y_hats = [y0]
-
-    candidate_grad = grad[1_000_000:]
-    candidate_samples = 1_000_000 + np.where(candidate_grad != 0)[0]
-
-    add_samples = np.where(candidate_grad < 0)[0]
-
-    this_data_weights = data_weights.at[add_samples].set(1)
-    this_jvp_kw = {k: v for k, v in vjp_kw.items()}
-    this_jvp_kw.update(dict(
-        data_weights=this_data_weights,
-        forward_only=True
-    ))
-
-    ret = vjp_robodm(**this_jvp_kw)
-    return ret
 
 def grad_from_store(deps, batch_indices):
     flat_deps = {k: v for d in deps.values() for k, v in d.items()}
@@ -194,7 +118,59 @@ def per_sample_loss_fn(params,
 
     return action_loss / divisor
 
-def compute_datamodels_lds():
+def lds_for_run(y0, num_datapoints, num_drop, lds_seed, grad, data_weights,
+                vjp_kw, num_trials=20):
+
+    ys = [y0]
+    y_hats = [y0]
+
+    candidate_grad = grad[1_000_000:]
+    candidate_samples = 1_000_000 + np.where(candidate_grad != 0)[0]
+    # num_leave_out = int(num_datapoints * drop_frac)
+    # num_leave_out = int(len(candidate_samples) * drop_frac)
+    num_leave_out = num_drop
+    rng = np.random.default_rng(lds_seed + SEED_SPACING)
+    all_drop_indices = []
+    for _ in range(num_trials):
+        # drop_indices = rng.choice(num_datapoints, num_leave_out, replace=False)
+        drop_indices = rng.choice(candidate_samples, num_leave_out, replace=False)
+        all_drop_indices.append(drop_indices)
+        # this_data_weights = data_weights.at[drop_indices].set(0)
+        this_data_weights = data_weights.at[drop_indices].set(1)
+        this_jvp_kw = {k: v for k, v in vjp_kw.items()}
+        this_jvp_kw.update(dict(
+            data_weights=this_data_weights,
+            forward_only=True
+        ))
+
+        # ret = vjp_lm(**this_jvp_kw)
+        ret = vjp_robodm(**this_jvp_kw)
+        ys.append(float(ret['primal']))
+
+        y_hat = y0 + grad @ (this_data_weights - data_weights)
+        y_hats.append(float(y_hat))
+
+    ys = np.array(ys)
+    y_hats = np.array(y_hats)
+
+    sr = spearmanr(ys, y_hats)
+    pr = pearsonr(ys, y_hats)
+    print("Spearman:", sr)
+    print("Pearson:", pr)
+
+    ret = dict(
+        sr=sr,
+        pr=pr,
+        ys=ys,
+        y_hats=y_hats,
+        all_drop_indices=all_drop_indices
+    )
+
+    # return sr, pr, y_hats, ys, all_drop_indices
+    return ret
+
+def setup_and_compute_lds(data_weights: jax.numpy.array,
+                          checkpoint_path: str):
 
     initialize_compilation_cache()
     devices = jax.devices()
@@ -202,58 +178,25 @@ def compute_datamodels_lds():
     # prevent tensorflow from using GPU memory since it's only used for data loading
     tf.config.set_visible_devices([], "GPU")
 
-    # formatted_date_time = datetime.now().strftime("%d-%b-%Y_%I-%M-%S%p").lower()
-    # formatted_date_time = 'test_diff_drop_steps_100_eps_1e-9'
-    # formatted_date_time = 'test_diff_drop_steps_200_eps_1e-8'
-    formatted_date_time = 'test_diff_drop_steps_150_eps_1e-8'
-    # formatted_date_time = 'test_diff_drop_steps_100_eps_1e-8'
-    # formatted_date_time = 'test_diff_drop_steps_100_eps_1e-7'
-    checkpoint_path = os.path.join(FLAGS.config.save_dir, FLAGS.config.dataset_kwargs.name, formatted_date_time)
     print('Checkpoint path:', checkpoint_path)
-
-    os.makedirs(checkpoint_path, exist_ok=True)
-
     FLAGS.config.checkpoint_path = checkpoint_path
 
-    _, data_weights = make_replay_dataset(0, 1e5, None, train=True, return_dw_only=True)
-    data_weights = jax.numpy.concatenate(
-        [data_weights, jax.numpy.zeros_like(data_weights)],
-        axis=0
-    )
     train_batcher = partial(make_split_loader_and_data_weights, mode='train', seed=FLAGS.config.seed)
     train_its = FLAGS.config.num_steps
-    # train_its = 10_000
     # train_its = 20
     # train_its = 2
 
     bob_its = FLAGS.config.bob_steps
     forward_its = train_its - bob_its
 
-    # from flatten_dict import flatten
-    # i = 0
-    # for batch in tqdm(train_batcher(0, 10_000, None), total=10_000):
-    # # for batch in tqdm(train_batcher(3_799, 3_810, None), total=10_000):
-    #     for item in batch.get_minibatches('train'):
-    #         print(item[1][0].keys())
-    #         pass
-            # item_flat = flatten(item[1][0], 'dot')
-            # for k, v in item_flat.items():
-            #     print(f'{k}: {v.dtype} and {v.shape}')
-    #     i += 1
-    #     if i > 200:
-    #         break
-
     val_batcher = partial(make_split_loader_and_data_weights, mode='val', seed=FLAGS.config.seed)
     # val_its = FLAGS.config.num_val_steps
     val_its = 1
     # val_batcher(0, 5, "")
 
-    # # quick test to see if this works
-    # for batch in val_batcher(0, 5, ""):
-    #     for item in batch.get_minibatches('val'):
-    #         pass
-
+    # load model
     model, frozen_params, trainable_params = make_model(train_batcher)
+    model.load_pretrained(checkpoint_path=checkpoint_path)
 
     num_trainable_params = sum(x.size for x in jax.tree_util.tree_leaves(trainable_params))
     num_frozen_params = sum(x.size for x in jax.tree_util.tree_leaves(frozen_params))
@@ -268,19 +211,6 @@ def compute_datamodels_lds():
         frozen_params=frozen_params,
         model=model,
     )
-
-    # # tesing per-sample loss fn
-    # for batch in train_batcher(0, 5, ""):
-    #     for minibatch in batch.get_minibatches('train'):
-    #         break
-    #     break
-
-    # psl(
-    #     params=trainable_params,
-    #     batch=minibatch,
-    #     data_weights=data_weights,
-    #     train=True
-    # )
 
     optimizer_dict = FLAGS.config.optimizer.to_dict()
     lr_scheduler_dict = optimizer_dict['learning_rate']
@@ -347,69 +277,24 @@ def compute_datamodels_lds():
         # forward_only=False,
     )
 
-    ret = vjp_robodm(**vjp_kw)
+    grad_path = os.path.join(checkpoint_path, 'datamodels.npy')
+    grad = np.load(grad_path)
 
-    vjp_kw.update(dict(
-        state=ret['final_state'],
-        n_train_ba=train_its,
-        forward_only=False,
-    ))
-
-    final_ret = vjp_robodm(**vjp_kw)
-
-    # y0 = float(ret['primal'])
-    # deps = ret['deps']
-    # batch_indices = ret['batch_indices']
-    # final_state = ret['final_state']
+    state_path = os.path.join(checkpoint_path, 'state.dill')
+    with open(state_path, "rb") as file:
+        final_ret = dill.load(file)
 
     y0 = float(final_ret['primal'])
-    deps = final_ret['deps']
-    batch_indices = final_ret['batch_indices']
-    final_state = final_ret['final_state']
     num_datapoints = data_weights.size
-
-    # merging final params
-
-    # print('remove this later')
-    # final_state = ret['final_state']
-
-    final_params = final_state.params
-
-    final_params = flax.traverse_util.flatten_dict(final_params)
-    flat_frozen_params = flax.traverse_util.flatten_dict(frozen_params)
-
-    all_params = final_params | flat_frozen_params
-    all_params = flax.traverse_util.unflatten_dict(all_params)
-
-    model = model.replace(params=all_params)
-
-    # save model
-    model.save_pretrained(step=train_its, checkpoint_path=checkpoint_path)
-    # model.load_pretrained(step=train_its, checkpoint_path=checkpoint_path)
-
-    import json
-    with open(os.path.join(checkpoint_path, 'hparams_config.json'), 'w') as f:
-        json.dump(FLAGS.config.to_dict(), f, indent=4)
-
-    grad = grad_from_store(deps, batch_indices)
-    print(grad)
-    if len(grad) > num_datapoints:
-        print('>> Shrinking grad array from', len(grad), 'to', num_datapoints)
-        assert (grad[num_datapoints:] == 0).all()
-        grad = grad[:num_datapoints]
-        print(grad)
-    elif len(grad) < num_datapoints:
-        print('>> Growing grad array from', len(grad), 'to', num_datapoints)
-        grad = np.concatenate([grad, np.zeros((num_datapoints - len(grad),))])
-        print(grad)
-
-    grad_path = os.path.join(checkpoint_path, 'datamodels.npy')
-    np.save(grad_path, grad)
-
-    drop_frac = 0.01
     lds_seed = FLAGS.config.seed
 
     num_drops = [32, 64, 128, 256]
+
+    vjp_kw.update(dict(
+        state=final_ret['final_state'],
+        n_train_ba=train_its,
+        forward_only=False,
+    ))
 
     ldses = []
     for num_drop in num_drops:
@@ -425,28 +310,43 @@ def compute_datamodels_lds():
 
         ldses.append(lds_res)
 
-    # with open('/mnt/xfs/home/alaakh/src/octo_dir/octo/exps/debug/bridge_dataset/test_diff_drop_200_steps/drop_res.pkl', 'wb') as f:
-    #     pickle.dump(ldses, f, protocol=pickle.HIGHEST_PROTOCOL)
-
-    bp()
-
-    return lds_res, vjp_kw
+    return {k: v for k, v in zip(num_drops, ldses)}
 
 def main(_):
-    # compute_datamodels_lds(model_seed,
-    #                        data_seed,
-    #                        test_sample,
-    #                        bs,
-    #                        drop_frac,
-    #                        lds_seed,
-    #                        load_and_data_weight_maker,
-    #                        model_maker,
-    #                        optimizer_maker)
 
-    ret, vjp_kw = compute_datamodels_lds()
-    # sr, pr, y_hats, ys, all_drop_indices = ret
-    # print('lds:', sr)
-    bp()
+    job_id = FLAGS.config.job_id
+
+    # formatted_date_time = datetime.now().strftime("%d-%b-%Y_%I-%M-%S%p").lower()
+    # formatted_date_time = 'test_data_selection_fast'
+    # formatted_date_time = 'test_data_selection_slow'
+    # formatted_date_time = 'test_data_selection_slow_more_iters'
+    formatted_date_time = FLAGS.config.folder_name
+    meta_checkpoint_path = os.path.join(FLAGS.config.save_dir, FLAGS.config.dataset_kwargs.name, formatted_date_time)
+
+    checkpoint_path = os.path.join(meta_checkpoint_path, f'iter_{job_id}')
+    assert os.path.exists(checkpoint_path)
+
+    if job_id == 0:
+        _, data_weights = make_replay_dataset(0, 1e5, None, train=True, return_dw_only=True)
+        data_weights = jax.numpy.concatenate(
+            [data_weights, jax.numpy.zeros_like(data_weights)],
+            axis=0
+        )
+
+    else:
+        prev_job = job_id - 1
+        prev_dw_path = os.path.join(meta_checkpoint_path, f'iter_{prev_job}', 'data_weights.npy')
+        assert os.path.exists(prev_dw_path)
+
+        data_weights = jnp.array(
+            np.load(prev_dw_path)
+        )
+
+    ldses = setup_and_compute_lds(data_weights, checkpoint_path)
+    ldses_path = os.path.join(checkpoint_path, 'ldses.pkl')
+
+    with open(ldses_path, 'wb') as f:
+        pickle.dump(ldses, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 if __name__ == '__main__':
     app.run(main)
