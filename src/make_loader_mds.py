@@ -367,7 +367,7 @@ def make_special_dataset(start_batch: int,
     dataset = OctoDataset(
         local=mds_path,
         remote=None,
-        shuffle=False,
+        shuffle=True,
         shuffle_seed=FLAGS.config.seed,
         batch_size=batch_size,
         transforms=process_item,
@@ -391,7 +391,241 @@ def make_special_dataset(start_batch: int,
 
     return dataloader, None
 
-def make_replay_iterators(start_batch, end_batch, sharding, data_iterators, mode, global_seed, batch_size):
+class SpecialReplayBatch(REPLAYBatch):
+    """
+    Similar to OctoREPLAYBatch, but under the hood it doesn't load the entire batch.
+    Instead, it will stream from data_iter chunk by chunk in get_minibatches(...).
+    """
+
+    def __init__(
+        self,
+        data_iter,
+        global_iter: int,
+        global_seed: int,
+        batch_size: int,
+        iter_bs: int,
+        minibs: int,
+        sharding,
+        offset: int
+    ):
+        # Like OctoREPLAYBatch, we call super().__init__(bs)
+        super().__init__(batch_size)
+
+        self.data_iter = data_iter
+        self.global_iter = global_iter
+        self.global_seed = global_seed
+        # self.bs = batch_size
+        self.iter_bs = iter_bs
+        self.minibs = minibs
+        self.sharding = sharding
+        self.offset = offset
+
+        self.batch_idx = FLAGS.config.num_steps - FLAGS.config.bob_steps
+
+        # We yield ourselves exactly once, just like your original design
+        self._exhausted = False
+
+    def __len__(self):
+        # If data_iter is sized, you can do len(self.data_iter),
+        # otherwise remove or approximate
+        return len(self.data_iter)
+
+    def __iter__(self):
+        """So `for x in special_batch:` yields exactly one x (self)."""
+        return self
+
+    def __next__(self):
+        if self._exhausted:
+            raise StopIteration
+        self._exhausted = True
+        return self
+
+    def get_minibatches(self, part: str):
+        """
+        Instead of yielding directly, we return a SpecialReplayMinibatches
+        object (like OctoREPLAYBatch returns OctoREPLAYMinibatches).
+        That object will handle chunked iteration under the hood.
+        """
+        return SpecialReplayMinibatches(
+            bs=self.bs,
+            iter_bs=self.iter_bs,
+            data_iter=self.data_iter,
+            global_iter=self.global_iter,
+            global_seed=self.global_seed,
+            minibs=self.minibs,
+            offset=self.offset,
+            sharding=self.sharding,
+            batch_idx=self.batch_idx,
+            part=part
+        )
+
+class SpecialReplayMinibatches(REPLAYMinibatches):
+    """
+    Similar to OctoREPLAYMinibatches, but it streams multiple 512-chunks from `data_iter`.
+    Each chunk is turned into an OctoREPLAYBatch, and we yield from that batch's minibatches.
+    """
+
+    def __init__(
+        self,
+        bs: int,
+        iter_bs: int,
+        data_iter,
+        global_iter,
+        global_seed,
+        minibs: int,
+        offset: int,
+        sharding,
+        batch_idx: int,
+        part: str
+    ):
+        # Like OctoREPLAYMinibatches, we call super().__init__(bs).
+        super().__init__(bs)
+
+        self.data_iter = data_iter
+        self.global_iter = global_iter
+        self.global_seed = global_seed
+        self.minibs = minibs
+        self.offset = offset
+        self.sharding = sharding
+        self.batch_idx = batch_idx
+        self.part = part
+
+        # This object can have .bs, .minibs, etc. that calling code might expect
+        self.bs = bs
+        self.iter_bs = iter_bs
+
+    def __iter__(self):
+        """
+        We'll fetch each 512-sized chunk from `self.data_iter`, create an OctoREPLAYBatch,
+        then yield all sub-minibatches from that batch.
+        """
+        for chunk in self.data_iter:
+            # Possibly check if chunk is empty (shape[0] == 0). If so, skip or break
+            first_key = next(iter(chunk.keys()))
+            if chunk[first_key].shape[0] == 0:
+                break
+
+            # Build seed array
+            seed = (self.global_iter * self.iter_bs) \
+                   + np.arange(self.iter_bs) \
+                   + int(self.global_seed * 1e9)
+            seed = seed.astype('int64')
+            chunk['seed'] = seed
+
+            # unflatten if needed
+            chunk = unflatten(chunk, 'dot')
+
+            # Wrap in an OctoREPLAYBatch (just like your normal pipeline)
+            replay_batch = OctoREPLAYBatch(
+                batch=chunk,
+                bs=self.iter_bs,
+                minibs=self.minibs,
+                sharding=self.sharding,
+                state=self.data_iter.state_dict() if hasattr(self.data_iter, 'state_dict') else None,
+                batch_idx=self.batch_idx
+            )
+
+            if self.offset:
+                replay_batch.set_offset(1_000_000)
+
+            # Increase global_iter for the next chunk
+            self.global_iter += 1
+
+            # "Yield from" the sub-minibatches of this chunk
+            yield from replay_batch.get_minibatches(self.part)
+
+# class SpecialReplayBatch:
+#     def __init__(self,
+#                  data_iter,
+#                  global_iter: int,
+#                  global_seed: int,
+#                  batch_size: int,
+#                  minibs: int,
+#                  sharding,
+#                  offset: int):
+
+#         self.data_iter = data_iter
+#         self.global_iter = global_iter
+#         self.global_seed = global_seed
+#         self.batch_size = batch_size
+#         self.minibs = minibs
+#         self.sharding = sharding
+#         self.offset = offset
+
+#         self.batch_idx = FLAGS.config.num_steps - FLAGS.config.bob_steps
+
+#         self._exhausted = False  # Will track if we've already yielded once
+
+#     def __len__(self):
+#         return len(self.data_iter)
+
+#     def __iter__(self):
+#         """
+#         Make this object an iterable by returning 'self'.
+#         Python expects an iterator to return itself from __iter__.
+#         """
+#         return self
+
+#     def __next__(self):
+#         """
+#         We'll yield ourselves exactly once. After that, raise StopIteration.
+#         This way:
+#             next(big_replay_batch)  -> returns big_replay_batch (the first time)
+#             next(big_replay_batch)  -> StopIteration
+#         And 'for x in big_replay_batch:' also yields exactly one 'x'.
+#         """
+#         if self._exhausted:
+#             raise StopIteration
+
+#         self._exhausted = True
+#         return self
+
+#     def get_minibatches(self, part: str):
+#         """
+#         Generator that yields sub-chunks (each of size 512, if ds_attrib is 512-sized),
+#         wrapped in OctoREPLAYBatch. Streams from ds_attrib without storing everything.
+#         """
+
+#         for batch in self.data_iter:
+
+#             # Build seed array for this chunk
+#             seed = (self.global_iter * self.batch_size) \
+#                    + np.arange(self.batch_size) \
+#                    + int(self.global_seed * 1e9)
+
+#             seed = seed.astype('int64')
+#             batch['seed'] = seed
+
+#             # Suppose you have a function unflatten:
+#             batch = unflatten(batch, 'dot')
+
+#             # Wrap the chunk in your usual OctoREPLAYBatch (split into minibs=64, etc.)
+#             replay_batch = OctoREPLAYBatch(
+#                 batch=batch,
+#                 bs=self.batch_size,
+#                 minibs=self.minibs,
+#                 sharding=self.sharding,
+#                 state=self.data_iter.state_dict(),  # if ds_attrib has state
+#                 batch_idx=self.batch_idx  # or pass something meaningful
+#             )
+
+#             if self.offset:
+#                 replay_batch.set_offset(1_000_000)
+
+#             for minibatch in replay_batch.get_minibatches(part):
+#                 yield minibatch
+
+#             self.global_iter += 1
+
+def make_replay_iterators(
+        start_batch,
+        end_batch,
+        sharding,
+        data_iterators,
+        mode,
+        global_seed,
+        batch_size
+    ):
 
     ds_iter, ds_attrib = data_iterators
     if mode != 'train':
@@ -412,14 +646,27 @@ def make_replay_iterators(start_batch, end_batch, sharding, data_iterators, mode
     else:
         global_iter = start_batch + len(ds_attrib)
 
-    entering_special = False
+    if ds_attrib is not None:
+        ds_special = SpecialReplayBatch(
+            data_iter=ds_attrib,
+            global_iter=global_iter,
+            global_seed=global_seed,
+            batch_size=batch_size*len(ds_attrib),
+            iter_bs=batch_size,
+            minibs=minibs,
+            sharding=sharding,
+            offset=1_000_000,
+        )
+    else:
+        ds_special = None
+
     while batch_idx < end_batch:
 
         if mode != 'train':
             data_iterator = ds_iter
         else:
             if batch_idx == special_batch:
-                data_iterator = ds_attrib
+                data_iterator = ds_special
             else:
                 data_iterator = ds_iter
 
@@ -427,41 +674,39 @@ def make_replay_iterators(start_batch, end_batch, sharding, data_iterators, mode
             if batch_idx >= end_batch:
                 break
 
-            # seed = batch_idx * batch_size + np.arange(batch_size) + global_seed * 1e9
-            seed = global_iter * batch_size + np.arange(batch_size) + global_seed * 1e9
-            seed = seed.astype('int64')
-            batch['seed'] = seed
-
-            batch = unflatten(batch, 'dot')
-
-            replay_batch = OctoREPLAYBatch(
-                batch=batch,
-                bs=batch_size,
-                minibs=minibs,
-                sharding=sharding,
-                state=data_iterator.state_dict(),
-                batch_idx=batch_idx,
-            )
-
             if batch_idx == special_batch:
-                replay_batch.set_offset(1_000_000)
+                yield ds_special
 
-            yield replay_batch
+            else:
+                # here it's the regular iterator
+                # we keep the same
+                seed = global_iter * batch_size + np.arange(batch_size) + global_seed * 1e9
+                seed = seed.astype('int64')
+                batch['seed'] = seed
 
-            global_iter += 1
-            if mode != 'train' or batch_idx != special_batch:
-                batch_idx += 1
-                if batch_idx == special_batch:
-                    entering_special = True
-                    break
+                batch = unflatten(batch, 'dot')
 
-            entering_special = False
+                replay_batch = OctoREPLAYBatch(
+                    batch=batch,
+                    bs=batch_size,
+                    minibs=minibs,
+                    sharding=sharding,
+                    state=data_iterator.state_dict(),
+                    batch_idx=batch_idx,
+                )
 
-        if mode == 'train' and batch_idx == special_batch and not entering_special:
-            global_iter += 1
+                yield replay_batch
+
+                global_iter += 1
+
             batch_idx += 1
 
-def create_special_index():
+        # what to do here?
+        # if mode == 'train' and batch_idx == special_batch and not entering_special:
+        #     global_iter += 1
+        #     batch_idx += 1
+
+def create_special_index(iter_seed:int=0):
 
     checkpoint_path = FLAGS.config.checkpoint_path
     special_index_path = os.path.join(
@@ -485,7 +730,7 @@ def create_special_index():
         FLAGS.config.candidate_size * len(index['shards'])
     )
 
-    rng = np.random.default_rng(FLAGS.config.seed)
+    rng = np.random.default_rng(iter_seed + FLAGS.config.seed)
     candidate_shards = rng.choice(index['shards'], num_candidate_shards, replace=False).tolist()
 
     special_index = {
@@ -500,11 +745,13 @@ def make_split_loader_and_data_weights(start_batch: int,
                                        end_batch: int,
                                        sharding: str,
                                        mode: str='train',
-                                       seed: int=42):
+                                       seed: int=42,
+                                       iter_seed: int=0):
 
     assert mode in ['train', 'val', 'test']
 
-    create_special_index()
+    if mode == 'train':
+        create_special_index(iter_seed=iter_seed)
 
     ds_iter, _ = make_replay_dataset(start_batch, end_batch, sharding, train=(mode=='train'))
     if mode == 'train':

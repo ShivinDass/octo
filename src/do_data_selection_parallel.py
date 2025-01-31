@@ -118,7 +118,8 @@ def per_sample_loss_fn(params,
     return action_loss / divisor
 
 def data_selection_iter(data_weights: jax.numpy.array,
-                        checkpoint_path: str):
+                        checkpoint_path: str,
+                        job_id: int=0):
 
     initialize_compilation_cache()
     devices = jax.devices()
@@ -131,13 +132,18 @@ def data_selection_iter(data_weights: jax.numpy.array,
 
     FLAGS.config.checkpoint_path = checkpoint_path
 
-    train_batcher = partial(make_split_loader_and_data_weights, mode='train', seed=FLAGS.config.seed)
+    train_batcher = partial(make_split_loader_and_data_weights, mode='train', seed=FLAGS.config.seed, iter_seed=job_id)
     train_its = FLAGS.config.num_steps
-    # train_its = 20
-    # train_its = 2
-
     bob_its = FLAGS.config.bob_steps
     forward_its = train_its - bob_its
+
+    # # special_batch = FLAGS.config.num_steps - FLAGS.config.bob_steps
+    # for batch in train_batcher(0, 5, None):
+    # # for batch in train_batcher(20, 21, None):
+    # # for batch in train_batcher(special_batch, special_batch+1, None):
+    #     for item in batch.get_minibatches('train'):
+    #         bp()
+    #         pass
 
     val_batcher = partial(make_split_loader_and_data_weights, mode='val', seed=FLAGS.config.seed)
     # val_its = FLAGS.config.num_val_steps
@@ -223,7 +229,10 @@ def data_selection_iter(data_weights: jax.numpy.array,
         return_state=True,
         forward_only=True,
         # forward_only=False,
+        segment_size=2,
     )
+
+    print('undo segment size')
 
     ret = vjp_robodm(**vjp_kw)
 
@@ -233,6 +242,9 @@ def data_selection_iter(data_weights: jax.numpy.array,
         forward_only=False,
     ))
 
+    os.environ['SECOND'] = '1'
+    from ipdb import launch_ipdb_on_exception
+    # with launch_ipdb_on_exception():
     final_ret = vjp_robodm(**vjp_kw)
 
     y0 = float(final_ret['primal'])
@@ -260,6 +272,15 @@ def data_selection_iter(data_weights: jax.numpy.array,
     import json
     with open(os.path.join(checkpoint_path, 'hparams_config.json'), 'w') as f:
         json.dump(FLAGS.config.to_dict(), f, indent=4)
+
+    # indices = set()
+    # special_batch = FLAGS.config.num_steps - FLAGS.config.bob_steps
+    # for batch in train_batcher(special_batch, special_batch+1, None):
+    #     for item in batch.get_minibatches('train'):
+    #         pass
+            # indices |= set(item[0].tolist())
+
+    bp()
 
     grad = grad_from_store(deps, batch_indices)
     print(grad)
@@ -312,7 +333,11 @@ def main(_):
             np.load(prev_dw_path)
         )
 
-    grad = data_selection_iter(data_weights, checkpoint_path)
+    grad = data_selection_iter(
+        data_weights,
+        checkpoint_path,
+        job_id=job_id,
+    )
 
     candidate_grad = grad[1_000_000:]
     # order = np.argsort(candidate_grad)
