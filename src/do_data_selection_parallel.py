@@ -61,7 +61,6 @@ def grad_from_store(deps, batch_indices):
 
 @cache
 def make_vjp_skele(bs):
-    raise NotImplementedError
     return jax.tree_util.Partial(partial(example_loss_vjp_skeleton, bs=bs))
 
 @partial(jax.jit, static_argnames=['train', 'divisor'])
@@ -200,13 +199,13 @@ def data_selection_iter(data_weights: jax.numpy.array,
     )
 
     aux_datasets = {}
-    return_state = True
     return_kw = False
 
     sharding, replicated_sharding = make_shardings()
     head_val_batcher = jax.tree_util.Partial(val_batcher, sharding=sharding)
 
-    vjp_skele = jax.tree_util.Partial(partial(example_loss_vjp_skeleton, bs=FLAGS.config.batch_size))
+    # vjp_skele = jax.tree_util.Partial(partial(example_loss_vjp_skeleton, bs=FLAGS.config.batch_size))
+    vjp_skele = make_vjp_skele
     vjp_head = partial(
         sample_loss_vjp_head,
         per_sample_loss=psl,
@@ -229,10 +228,7 @@ def data_selection_iter(data_weights: jax.numpy.array,
         return_state=True,
         forward_only=True,
         # forward_only=False,
-        segment_size=2,
     )
-
-    print('undo segment size')
 
     ret = vjp_robodm(**vjp_kw)
 
@@ -242,9 +238,6 @@ def data_selection_iter(data_weights: jax.numpy.array,
         forward_only=False,
     ))
 
-    os.environ['SECOND'] = '1'
-    from ipdb import launch_ipdb_on_exception
-    # with launch_ipdb_on_exception():
     final_ret = vjp_robodm(**vjp_kw)
 
     y0 = float(final_ret['primal'])
@@ -279,8 +272,6 @@ def data_selection_iter(data_weights: jax.numpy.array,
     #     for item in batch.get_minibatches('train'):
     #         pass
             # indices |= set(item[0].tolist())
-
-    bp()
 
     grad = grad_from_store(deps, batch_indices)
     print(grad)

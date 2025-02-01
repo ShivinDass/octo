@@ -373,7 +373,7 @@ def replay_stage(final_i, start_i, train_batcher, psl_train, state_to_vjp_skele,
         else:
             nbatch, nminibatches, nstate = None, None, None
 
-        vjp_skele = state_to_vjp_skele(state)
+        vjp_skele = state_to_vjp_skele(state)(bs=minibatches.bs)
         ret = backward_step(minibatches, state, state_p1, state_cotangents,
                             vjp_skele, psl_train=psl_train)
 
