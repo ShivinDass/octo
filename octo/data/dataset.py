@@ -419,6 +419,7 @@ def make_dataset_from_rlds(
         split = "train[:95%]" if train else "train[95%:]"
     else:
         split = "train" if train else "val"
+    # split="all"
 
     options = tf.data.Options()
     options.experimental_deterministic = True

@@ -13,6 +13,7 @@ from datetime import datetime
 from functools import partial
 from functools import cache
 from scipy.stats import spearmanr, pearsonr
+import json
 
 # from domains.vjp_lm import vjp_lm
 # from domains.vjp_blocks import one_sample_vjp_head, sample_loss_vjp_head, \
@@ -294,6 +295,53 @@ def data_selection_iter(data_weights: jax.numpy.array,
 
     return grad
 
+def create_include_index(candidate_grad):
+    index_path = os.path.join(
+        FLAGS.config.dataset_kwargs.data_dir,
+        FLAGS.config.dataset_kwargs.name,
+        'index.json'
+    )
+
+    previous_include_index_path = FLAGS.config.include_index_path
+    with open(previous_include_index_path, 'r') as f:
+        previous_include_index = json.load(f)
+
+    with open(index_path, 'r') as f:
+        index = json.load(f)
+
+    selected_shards_idxs = set()
+    for shard in previous_include_index['shards']:
+        shard_idx = int(shard['raw_data']['basename'].split('/')[0].split('_')[-1])
+        if candidate_grad[shard_idx] <= 0:
+            selected_shards_idxs.add(shard_idx)
+
+    for shard in index['shards']:
+        shard_idx = int(shard['raw_data']['basename'].split('/')[0].split('_')[-1])
+        if candidate_grad[shard_idx] < 0: # select the sample
+            selected_shards_idxs.add(shard_idx)
+
+    selected_shards = []
+    for shard in index['shards']:
+        shard_idx = int(shard['raw_data']['basename'].split('/')[0].split('_')[-1])
+        if shard_idx in selected_shards_idxs:
+            selected_shards.append(shard)
+
+    include_index = {
+        'shards': selected_shards,
+        'version': 2
+    }
+
+    print(len(include_index['shards']))
+
+    checkpoint_path = FLAGS.config.checkpoint_path
+    include_index_path = os.path.join(
+        checkpoint_path,
+        'include_index.json'
+    )
+
+    with open(include_index_path, 'w') as f:
+        json.dump(include_index, f)
+
 def main(_):
 
     job_id = FLAGS.config.job_id
@@ -315,13 +363,30 @@ def main(_):
             axis=0
         )
 
+        FLAGS.config.include_index_path =  os.path.join(
+            FLAGS.config.dataset_kwargs.data_dir,
+            FLAGS.config.dataset_kwargs.name,
+            'index.json'
+        )
+
     else:
         prev_job = job_id - 1
-        prev_dw_path = os.path.join(meta_checkpoint_path, f'iter_{prev_job}', 'data_weights.npy')
-        assert os.path.exists(prev_dw_path)
+        # prev_dw_path = os.path.join(meta_checkpoint_path, f'iter_{prev_job}', 'data_weights.npy')
 
-        data_weights = jnp.array(
-            np.load(prev_dw_path)
+        # data_weights = jnp.array(
+        #     np.load(prev_dw_path)
+        # )
+        _, data_weights = make_replay_dataset(0, 1e5, None, train=True, return_dw_only=True)
+        data_weights = jax.numpy.concatenate(
+            [data_weights, jax.numpy.zeros_like(data_weights)],
+            axis=0
+        )
+
+        prev_checkpoint_path = os.path.join(meta_checkpoint_path, f'iter_{prev_job}')
+        assert os.path.exists(prev_checkpoint_path)
+        FLAGS.config.include_index_path = os.path.join(
+            prev_checkpoint_path,
+            'include_index.json'
         )
 
     grad = data_selection_iter(
@@ -338,14 +403,17 @@ def main(_):
     # negative will decrease loss (include)
     # positive will increase loss (exclude)
 
-    include_samples = jnp.where(candidate_grad < 0)[0]
-    exclude_samples = jnp.where(candidate_grad > 0)[0]
+    # include_samples = jnp.where(candidate_grad < 0)[0]
+    # exclude_samples = jnp.where(candidate_grad > 0)[0]
 
-    data_weights = data_weights.at[include_samples].set(1)
-    data_weights = data_weights.at[exclude_samples].set(0)
+    # data_weights = data_weights.at[include_samples].set(1)
+    # data_weights = data_weights.at[exclude_samples].set(0)
 
-    step_path = os.path.join(checkpoint_path, 'data_weights.npy')
-    np.save(step_path, np.array(data_weights))
+    # step_path = os.path.join(checkpoint_path, 'data_weights.npy')
+    # np.save(step_path, np.array(data_weights))
 
+    # create new index for training data
+    create_include_index(candidate_grad)
+    
 if __name__ == '__main__':
     app.run(main)

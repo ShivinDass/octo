@@ -172,7 +172,8 @@ def make_replay_dataset(start_batch: int,
                         end_batch: int,
                         sharding: str,
                         train: bool=True,
-                        return_dw_only: bool=False):
+                        return_dw_only: bool=False,
+                        index_path: str=''):
 
     # initialize_compilation_cache()
     # prevent tensorflow from using GPU memory since it's only used for data loading
@@ -251,6 +252,7 @@ def make_replay_dataset(start_batch: int,
         shuffle_seed=FLAGS.config.seed,
         batch_size=batch_size,
         transforms=process_item,
+        index_filename=index_path
     )
 
     def numpy_collate(batch):
@@ -753,10 +755,12 @@ def make_split_loader_and_data_weights(start_batch: int,
     if mode == 'train':
         create_special_index(iter_seed=iter_seed)
 
-    ds_iter, _ = make_replay_dataset(start_batch, end_batch, sharding, train=(mode=='train'))
+    # ds_iter, _ = make_replay_dataset(start_batch, end_batch, sharding, train=(mode=='train'), index_path=FLAGS.config.include_index_path)
     if mode == 'train':
+        ds_iter, _ = make_replay_dataset(start_batch, end_batch, sharding, train=True, index_path=FLAGS.config.include_index_path)
         ds_attrib, _ = make_special_dataset(start_batch, end_batch, sharding)
     else:
+        ds_iter, _ = make_replay_dataset(start_batch, end_batch, sharding, train=False)
         ds_attrib = None
 
     if mode == 'train':
