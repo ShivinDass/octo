@@ -2,42 +2,26 @@ from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 import os
 
-def get_config(config_string="br,0.05"):
-    method_name, percent = config_string.split(',')
-    assert method_name in ['br', 'flow', 'action', 'dm']
+# task_name="kitchen_scene3_turn_on_the_stove_and_put_the_moka_pot_on_it_h8_prechunk"
+# task_name="kitchen_scene4_put_the_black_bowl_in_the_bottom_drawer_of_the_cabinet_and_close_it_h8_prechunk"
+def get_config(config_string="br,0.1"):
+    method_name, percent, task_name = config_string.split(',')
+    assert method_name in ['br', 'flow', 'action', 'language']
 
     mode, task = "full", "language_conditioned"
     assert task in ["image_conditioned", "language_conditioned", "multimodal"]
     assert mode in ["full", "head_only", "head_mlp_only"]
 
-    data_dir = '/mnt/hdd1/baselines'    
-    # method_name = 'flow'
-    target_train_path = os.path.join(data_dir, 'target_data/easy_pick_dataset_n10_h8_prechunk/train', 'out.tfrecord')
-    prior_train_path = os.path.join(data_dir, f'retrieved_data/dm_ut_oxe_easy_pick_n10/{method_name}/out.tfrecord')
+    data_dir = '/mnt/hdd2/baselines/'    
 
+    target_train_path = os.path.join(data_dir, f'target_data_chunk8/{task_name}/train', 'out.tfrecord')
+    prior_train_path = os.path.join(data_dir, f'/mnt/hdd2/baselines/retrieved_data_chunk8/{task_name}/{task_name}_th{percent}/{method_name}/out.tfrecord')
 
     FINETUNING_KWARGS = {
         "data_paths": [[prior_train_path], [target_train_path]],
-        "sample_weights": [0.5, 0.5], 
+        "sample_weights": None, 
         "load_keys": 'all',
-        "dataset_statistics_path": "/home/shivin/tensorflow_datasets/easy_pick_dataset_n10/0.1.0/dataset_statistics_7f263ea7b63bc22b5d644da9d0f503ea0ad509cf109668b0e58c4e08144bcfa7.json",
-
-        # "name": "bridge_dataset",
-        # "data_dir": "/home/shivin/tensorflow_datasets",#"/mnt/hdd1/traj_data",
-        # "image_obs_keys": {"primary": "image_0", "wrist": None},
-        # "state_obs_keys": ["state", None],
-        # "language_key": "language_instruction",
-        # "action_proprio_normalization_type": "normal",
-        # # All actions are relative deltas, except for the last one (gripper) which is absolute
-        # # Specifying this is only necessary if you want to predict > 1 step into the future
-        # "absolute_action_mask": [False, False, False, False, False, False, True],
-        # "action_normalization_mask": [True, True, True, True, True, True, False],
-        # # standardize_fn is dynamically loaded from a file
-        # # for example: "experiments/kevin/custom_standardization_transforms.py:aloha_dataset_transform"
-        # "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:bridge_dataset_transform",
-        # # If the default data loading speed is too slow, try these:
-        # # "num_parallel_reads": 8,  # for reading from disk / GCS
-        # # "num_parallel_calls": 16,  # for initial dataset construction
+        "dataset_statistics_path": "/home/shivin/tensorflow_datasets/libero90/0.1.0/dataset_statistics_9abb65a9c7829f52c81741919ae39f05baf55b6a5aab3f0ddd897947d3b283e5.json",
     }
 
     if mode == "full":
@@ -55,11 +39,11 @@ def get_config(config_string="br,0.05"):
     else:
         raise ValueError("Invalid mode")
 
-    max_steps = FieldReference(50000)
+    max_steps = FieldReference(10_000)
     window_size = FieldReference(default=1)
 
     config = dict(
-        use_proprio=False,
+        use_proprio=True,
         action_chunks=4,
         pretrained_path=placeholder(str),
         pretrained_step=placeholder(int),
@@ -69,8 +53,8 @@ def get_config(config_string="br,0.05"):
         log_interval=100,
         eval_interval=int(max_steps.get()//5),
         save_interval=int(max_steps.get()),
-        save_ckpts=[50000],
-        save_dir='/home/shivin/foundation_models/experiments',
+        save_ckpts=[10000],
+        save_dir='/mnt/hdd2/libero/experiments/',
         seed=42,
         wandb=dict(
             project="octo_finetune", group=placeholder(str), entity=placeholder(str)

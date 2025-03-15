@@ -23,6 +23,17 @@ from octo.data.utils.data_utils import (
     relabel_actions,
 )
 
+def custom_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    trajectory["action"] = tf.concat(
+        (
+            trajectory["action"][:, :6],
+            tf.clip_by_value(trajectory["action"][:, -1:], 0, 1),
+        ),
+        axis=-1,
+    )
+    trajectory["observation"]["state"] = trajectory["observation"]["state"][:, :8]
+
+    return trajectory
 
 def bridge_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     # NOTE: this is not actually the official OXE copy of bridge, it is our own more up-to-date copy that you
@@ -795,6 +806,8 @@ def gnm_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
 
 
 OXE_STANDARDIZATION_TRANSFORMS = {
+    "simpler_carrot_dataset": custom_dataset_transform,
+    "libero90": custom_dataset_transform,
     "bridge_dataset": bridge_dataset_transform,
     "fractal20220817_data": rt1_dataset_transform,
     "kuka": kuka_dataset_transform,

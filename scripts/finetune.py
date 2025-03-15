@@ -146,6 +146,23 @@ def main(_):
     config = config.to_dict()
     check_config_diff(config, pretrained_model.config)
 
+    # del config["model"]["observation_tokenizers"]["wrist"]
+    if  FLAGS.config.use_proprio:
+        from octo.model.components.tokenizers import LowdimObsTokenizer
+        config["model"]["observation_tokenizers"]["proprio"] = ModuleSpec.create(
+            LowdimObsTokenizer,
+            n_bins=256,
+            bin_type="normal",
+            low=-2.0,
+            high=2.0,
+            obs_keys=["proprio"],
+        )
+
+    future_action_window_size = FLAGS.config.traj_transform_kwargs.future_action_window_size
+    if future_action_window_size != 3:
+        print(f"Changing action head to predict next {future_action_window_size+1} actions")
+        config["model"]["heads"]["action"]['kwargs'].update(pred_horizon=future_action_window_size+1)
+
     #########
     #
     # Setup Data Loader

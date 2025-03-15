@@ -63,7 +63,7 @@ def get_dtype_from_key(key):
         return tf.bool
     elif 'image' in key:
         return tf.uint8
-    elif 'timestep' in key:
+    elif ('timestep' in key) or (key == 'index'):
         return tf.int32
     elif ('dataset_name' in key) or ('language' in key):
         return tf.string

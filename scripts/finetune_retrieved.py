@@ -147,16 +147,22 @@ def main(_):
     config = config.to_dict()
     check_config_diff(config, pretrained_model.config)
 
-    del config["model"]["observation_tokenizers"]["wrist"]
-    # from octo.model.components.tokenizers import LowdimObsTokenizer
-    # config["model"]["observation_tokenizers"]["proprio"] = ModuleSpec.create(
-    #     LowdimObsTokenizer,
-    #     n_bins=256,
-    #     bin_type="normal",
-    #     low=-2.0,
-    #     high=2.0,
-    #     obs_keys=["proprio"],
-    # )
+    # del config["model"]["observation_tokenizers"]["wrist"]
+    if FLAGS.config.get("use_proprio", False):
+        from octo.model.components.tokenizers import LowdimObsTokenizer
+        config["model"]["observation_tokenizers"]["proprio"] = ModuleSpec.create(
+            LowdimObsTokenizer,
+            n_bins=256,
+            bin_type="normal",
+            low=-2.0,
+            high=2.0,
+            obs_keys=["proprio"],
+        )
+    
+    action_chunks = FLAGS.config.get("action_chunks", 4)
+    if action_chunks != 4:
+        print(f"Changing action head to predict next {action_chunks} actions")
+        config["model"]["heads"]["action"]['kwargs'].update(pred_horizon=action_chunks)
 
     #########
     #
@@ -357,18 +363,30 @@ def main(_):
         modes_to_evaluate = ["base"]
 
 
-    # TODO this also
-    dataset_kwargs_list = [FLAGS.config.dataset_kwargs]
+    if "val_dataset_kwargs" in FLAGS.config:
+        if (
+            standardize_fn := FLAGS.config["val_dataset_kwargs"].get("standardize_fn", None)
+        ) is not None:
+            path, name = standardize_fn.split(":")
+            # imp is deprecated, but it's also what ml_collections uses
+            standardize_fn = getattr(imp.load_source("standardize_fn", path), name)
+            del FLAGS.config["val_dataset_kwargs"]["standardize_fn"]
+            FLAGS.config["val_dataset_kwargs"]["standardize_fn"] = standardize_fn
 
-    # val_callback = ValidationCallback(
-    #     loss_fn=loss_fn,
-    #     process_batch_fn=process_batch,
-    #     text_processor=text_processor,
-    #     val_dataset_kwargs_list=dataset_kwargs_list,
-    #     dataset_kwargs=FLAGS.config,
-    #     modes_to_evaluate=modes_to_evaluate,
-    #     **FLAGS.config.val_kwargs,
-    # )
+        dataset_kwargs_list = [FLAGS.config.val_dataset_kwargs]
+        print(FLAGS.config.val_dataset_kwargs)
+
+        val_callback = ValidationCallback(
+            loss_fn=loss_fn,
+            process_batch_fn=process_batch,
+            text_processor=text_processor,
+            val_dataset_kwargs_list=dataset_kwargs_list,
+            dataset_kwargs=FLAGS.config,
+            modes_to_evaluate=modes_to_evaluate,
+            **FLAGS.config.val_kwargs,
+        )
+    else:
+        val_callback = None
 
     # viz_callback = VisualizationCallback(
     #     text_processor=text_processor,
@@ -430,9 +448,10 @@ def main(_):
         if (i + 1) % FLAGS.config.eval_interval == 0:
             logging.info("Evaluating...")
 
-            # with timer("val"):
-            #     val_metrics = val_callback(train_state, i + 1)
-            #     wandb_log(val_metrics, step=i)
+            if val_callback is not None:
+                with timer("val"):
+                    val_metrics = val_callback(train_state, i + 1)
+                    wandb_log(val_metrics, step=i)
 
             # with timer("visualize"):
             #     viz_metrics = viz_callback(train_state, i + 1)
@@ -443,7 +462,7 @@ def main(_):
                     rollout_metrics = rollout_callback(train_state, i + 1)
                     wandb_log(rollout_metrics, step=i)
 
-        if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
+        if (((i + 1) in FLAGS.config.save_ckpts) or ((i + 1) % FLAGS.config.save_interval == 0)) and save_dir is not None:
             logging.info("Saving checkpoint...")
             save_callback(train_state, i + 1)
 

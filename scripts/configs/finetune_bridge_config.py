@@ -15,7 +15,7 @@ def get_config(config_string="full,language_conditioned"):
 
     FINETUNING_KWARGS = {
         "name": "bridge_dataset",
-        "data_dir": "/home/shivin/tensorflow_datasets",#"/mnt/hdd1/traj_data",
+        "data_dir": "/mnt/hdd1/traj_data",
         "image_obs_keys": {"primary": "image_0", "wrist": None},
         "state_obs_keys": ["state", None],
         "language_key": "language_instruction",

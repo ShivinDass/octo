@@ -25,11 +25,7 @@ def get_config(config_string="full,language_conditioned"):
         "absolute_action_mask": [False, False, False, False, False, False, True],
         "action_normalization_mask": [True, True, True, True, True, True, False],
         # standardize_fn is dynamically loaded from a file
-        # for example: "experiments/kevin/custom_standardization_transforms.py:aloha_dataset_transform"
         "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:custom_dataset_transform",
-        # If the default data loading speed is too slow, try these:
-        # "num_parallel_reads": 8,  # for reading from disk / GCS
-        # "num_parallel_calls": 16,  # for initial dataset construction
     }
 
     if mode == "full":
@@ -48,9 +44,10 @@ def get_config(config_string="full,language_conditioned"):
         raise ValueError("Invalid mode")
 
     max_steps = FieldReference(50_000)
-    window_size = FieldReference(default=2)
+    window_size = FieldReference(default=1)
 
     config = dict(
+        use_proprio=True,
         pretrained_path=placeholder(str),
         pretrained_step=placeholder(int),
         batch_size=BATCH_SIZE,

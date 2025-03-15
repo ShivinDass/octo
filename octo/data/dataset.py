@@ -348,6 +348,9 @@ def make_dataset_from_rlds(
             "dataset_name": tf.repeat(name, traj_len),
         }
 
+        if "index" in traj:
+            traj["index"] = tf.cast(traj["index"], tf.int32)
+
         if absolute_action_mask is not None:
             if len(absolute_action_mask) != traj["action"].shape[-1]:
                 raise ValueError(
@@ -361,9 +364,9 @@ def make_dataset_from_rlds(
 
         return traj
 
-    builder = tfds.builder(name, data_dir=data_dir)
+    # builder = tfds.builder(name, data_dir=data_dir)
     # shivin: use the followin when using downloaded datasets, otherwise tfds throws an error
-    # builder = tfds.builder(f"{name}:0.1.0", data_dir=data_dir)
+    builder = tfds.builder(f"{name}:0.1.0", data_dir=data_dir)
 
     # load or compute dataset statistics
     if isinstance(dataset_statistics, str):
