@@ -229,7 +229,7 @@ class LanguageTokenizer(nn.Module):
 
         return TokenGroup(tokens, pad_mask)
 
-
+EPS=5e-3
 class BinTokenizer(nn.Module):
     """
     Tokenizes continuous inputs via dimension-wise binning in given range.
@@ -259,6 +259,13 @@ class BinTokenizer(nn.Module):
     def __call__(self, inputs):
         if self.bin_type == "uniform":
             inputs = jnp.clip(inputs, self.low + EPS, self.high - EPS)
+        elif self.bin_type == "normal":
+            inputs = jnp.clip(inputs, -5, 5)
+        else:
+            raise ValueError(
+                f"Binning type {self.bin_type} not supported in BinTokenizer."
+            )
+        
         inputs = inputs[..., None]
         token_one_hot = (inputs < self.thresholds[1:]) & (
             inputs >= self.thresholds[:-1]

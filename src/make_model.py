@@ -13,6 +13,7 @@ import numpy as np
 
 from octo.data.dataset import make_single_dataset
 from octo.model.octo_model import OctoModel
+from octo.model.components.action_heads import DiscreteActionHead, L1ActionHead
 from octo.utils.jax_utils import initialize_compilation_cache
 from octo.utils.spec import ModuleSpec
 from octo.utils.train_utils import (
@@ -69,16 +70,54 @@ def make_model(data_batcher: Callable):
     config = config.to_dict()
     check_config_diff(config, pretrained_model.config)
 
+    for batch in data_batcher(0, 1, None):
+        example_batch = batch.batch
+        break
+
+    if FLAGS.config.get('use_proprio', False):
+        from octo.model.components.tokenizers import LowdimObsTokenizer
+        config["model"]["observation_tokenizers"]["proprio"] = ModuleSpec.create(
+            LowdimObsTokenizer,
+            n_bins=256,
+            bin_type="normal",
+            low=-2.0,
+            high=2.0,
+            obs_keys=["proprio"],
+        )
+    
+    action_chunks = FLAGS.config.get('action_chunks', 4)
+    if action_chunks != 4:
+        print(f"Changing action head to predict next {action_chunks} actions")
+        config["model"]["heads"]["action"]['kwargs'].update(pred_horizon=action_chunks)
+    
+    loss_type = FLAGS.config.get('loss_type', 'mse')
+    if loss_type == "l1":
+        print("Changing action head to predict using L1 loss")
+        config["model"]["heads"]["action"] = ModuleSpec.create(
+            L1ActionHead,
+            readout_key="readout_action",
+            pred_horizon=action_chunks,
+            action_dim=7
+        )
+    elif loss_type == "discrete":
+        print("Changing action head to predict using discrete loss")
+        config["model"]["heads"]["action"] = ModuleSpec.create(
+            DiscreteActionHead,
+            readout_key="readout_action",
+            use_map=False,
+            token_per="",
+            pred_horizon=1,
+            action_dim=7,
+            vocab_size=48,
+            normalization_type="normal",
+        )
+
     # create text processor
     if config["text_processor"] is None:
         text_processor = None
     else:
         text_processor = ModuleSpec.instantiate(config["text_processor"])()
     ############################################
-
-    for batch in data_batcher(0, 1, None):
-        example_batch = batch.batch
-        break
 
     ds_stat_path = os.path.join(
         FLAGS.config.dataset_kwargs.data_dir,

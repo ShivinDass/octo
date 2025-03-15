@@ -384,9 +384,11 @@ def make_dataset_from_rlds(
 
     # load or compute dataset statistics
     if isinstance(dataset_statistics, str):
+        # assert dataset_statistics == "/home/shivin/tensorflow_datasets/libero90/0.1.0/dataset_statistics_9abb65a9c7829f52c81741919ae39f05baf55b6a5aab3f0ddd897947d3b283e5.json"
         with tf.io.gfile.GFile(dataset_statistics, "r") as f:
             dataset_statistics = json.load(f)
     elif dataset_statistics is None:
+        # assert False, "dataset_statistics is None"
         full_dataset = dl.DLataset.from_rlds(
             builder, split="all", shuffle=False, num_parallel_reads=num_parallel_reads
         ).traj_map(restructure, num_parallel_calls)
@@ -419,7 +421,7 @@ def make_dataset_from_rlds(
         split = "train[:95%]" if train else "train[95%:]"
     else:
         split = "train" if train else "val"
-    # split="all"
+    split="all"
 
     options = tf.data.Options()
     options.experimental_deterministic = True

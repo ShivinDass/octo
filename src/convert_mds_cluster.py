@@ -243,16 +243,13 @@ def main(_):
     num_items = np.ceil(target_size / item_size)
     shard_size = int(num_items * item_size)
 
-    if TRAIN:
-        out_root = "/mnt/hdd2/libero/mpt_dataset/train"
-    else:
-        out_root = "/mnt/hdd2/libero/mpt_dataset/val"
+    out_root = "/mnt/hdd2/libero/mpt_dataset"
     if do_val:
         out_root = os.path.join(out_root, 'libero_val')
 
-    out_path = os.path.join(out_root, ds_name+'_tc')
+    out_path = os.path.join(out_root, ds_name+'_128x128')
 
-    if False:
+    if True:
         os.makedirs(out_path, exist_ok=True)
 
         prev_index = None

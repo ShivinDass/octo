@@ -179,18 +179,43 @@ def discrete_loss(
     loss = masked_mean(loss, mask)
 
     # compute accuracy between predicted actions and target actions
-    pred_label = jnp.argmax(logits, axis=-1)
-    accuracy = pred_label == labels
-    accuracy = masked_mean(accuracy, mask)
+    # pred_label = jnp.argmax(logits, axis=-1)
+    # accuracy = pred_label == labels
+    # accuracy = masked_mean(accuracy, mask)
 
     # detokenize the predicted actions
-    pred_value = discrete_tokenizer.decode(pred_label)
-    mse = jnp.square(pred_value - ground_truth_value)
-    mse = masked_mean(mse, mask)
+    # pred_value = discrete_tokenizer.decode(pred_label)
+    # mse = jnp.square(pred_value - ground_truth_value)
+    # mse = masked_mean(mse, mask)
     return loss, {
         "loss": loss,
-        "mse": mse,
-        "accuracy": accuracy,
+        # "mse": mse,
+        # "accuracy": accuracy,
+    }
+
+def per_sample_discrete_loss(
+    discrete_tokenizer: BinTokenizer,
+    logits: ArrayLike,
+    ground_truth_value: ArrayLike,
+    mask: ArrayLike,
+) -> Array:
+    """
+    Args:
+        discrete_tokenizer: BinTokenizer to use on ground_truth_value
+        logits: shape (batch_dims..., vocab_size)
+        ground_truth_value: continuous values in w/ shape (batch_dims...)
+        mask: broadcastable to ground_truth_value
+    """
+    labels = discrete_tokenizer(ground_truth_value)
+    labels_one_hot = jax.nn.one_hot(labels, logits.shape[-1])
+    print('>>> action label/logit shapes', labels.shape, labels_one_hot.shape, logits.shape)
+
+    loss = -jnp.sum(logits * labels_one_hot, axis=-1)
+    print('>>> loss shape', loss.shape)
+    loss = per_sample_masked_mean(loss, mask)
+
+    return loss, {
+        "loss": loss,
     }
 
 
@@ -239,7 +264,7 @@ class ContinuousActionHead(nn.Module, ActionHead):
         mean = rearrange(
             mean, "b w (p a) -> b w p a", p=self.pred_horizon, a=self.action_dim
         )
-        mean = jnp.tanh(mean / self.max_action) * self.max_action
+        # mean = jnp.tanh(mean / self.max_action) * self.max_action
         return mean
 
     def loss(
@@ -270,6 +295,42 @@ class ContinuousActionHead(nn.Module, ActionHead):
         actions_chunked = actions_chunked[:, :window_size]
 
         loss, metrics = continuous_loss(
+            mean, actions_chunked, pad_mask[:, :, None, None], loss_type=self.loss_type
+        )
+        # Sum over action dimension instead of averaging
+        loss = loss * self.action_dim
+        metrics["loss"] = metrics["loss"] * self.action_dim
+        metrics["mse"] = metrics["mse"] * self.action_dim
+        return loss, metrics
+    
+    def per_sample_loss(
+        self,
+        transformer_outputs: Dict[str, TokenGroup],
+        actions: ArrayLike,
+        pad_mask: ArrayLike,
+        train: bool = True,
+    ) -> Tuple[Array, Dict[str, Array]]:
+        """Computes the loss for the action regression objective.
+
+        Args:
+            transformer_ouputs: must contain self.readout_key with shape (batch_size, window_size, num_tokens,
+                embedding_size)
+            actions: shape (batch_size, >= window_size + pred_horizon - 1, action_dim)
+            pad_mask: boolean array (batch, window_size) which is True if the timestep is not a padding timestep
+
+        Returns:
+            loss: float
+            metrics: dict
+        """
+        # (batch, window_size, pred_horizon, action_dim)
+        mean = self(transformer_outputs, train=train)
+
+        window_size = mean.shape[1]
+        _check_action_window_size(actions, window_size, self.pred_horizon)
+        actions_chunked = chunk_actions(actions, self.pred_horizon)
+        actions_chunked = actions_chunked[:, :window_size]
+
+        loss, metrics = per_sample_continuous_loss(
             mean, actions_chunked, pad_mask[:, :, None, None], loss_type=self.loss_type
         )
         # Sum over action dimension instead of averaging
@@ -412,6 +473,49 @@ class DiscreteActionHead(nn.Module, ActionHead):
         metrics["mse"] = metrics["mse"] * self.action_dim
 
         return loss, metrics
+    
+    def per_sample_loss(
+        self,
+        transformer_outputs: Dict[str, TokenGroup],
+        actions: ArrayLike,
+        pad_mask: ArrayLike,
+        train: bool = True,
+    ):
+        """Computes the loss for the discretized action objective.
+
+        Args:
+            transformer_ouputs: must contain self.readout_key with shape (batch_size, window_size, num_tokens,
+                embedding_size)
+            actions: shape (batch_size, >= window_size + pred_horizon - 1, action_dim)
+            pad_mask: boolean array (batch, window_size) which is True if the timestep is not a padding timestep
+
+        Returns:
+            loss: float
+            metrics: dict
+        """
+        # get the logits for all the actions by taking the action tokens of each timestep,
+        # unfolding the pred_horizon dim, and projecting to the vocab size
+        # (batch, window_size, pred_horizon, action_dim, token_embedding_size)
+        action_logits = self(transformer_outputs, train=train)
+
+        window_size = action_logits.shape[1]
+        _check_action_window_size(actions, window_size, self.pred_horizon)
+
+        actions_chunked = chunk_actions(actions, self.pred_horizon)
+        actions_chunked = actions_chunked[:, :window_size]
+
+        loss, metrics = per_sample_discrete_loss(
+            self.action_tokenizer,
+            action_logits,
+            actions_chunked,
+            pad_mask[:, :, None, None],
+        )
+
+        # For MSE, sum over action dimension instead of averaging
+        # metrics["mse"] = metrics["mse"] * self.action_dim
+
+        return loss, metrics
+            
 
     def predict_action(
         self,

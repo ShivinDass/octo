@@ -117,7 +117,7 @@ class LiberoVal(tfds.core.GeneratorBasedBuilder):
         """Define data splits."""
         return {
             'train': self._generate_examples(source_path=os.path.join(DATA_DIR, DATASET_NAME + '_demo.hdf5'), train=True),
-            'val': self._generate_examples(source_path=os.path.join(DATA_DIR, DATASET_NAME + '_demo.hdf5'), train=False),
+            # 'val': self._generate_examples(source_path=os.path.join(DATA_DIR, DATASET_NAME + '_demo.hdf5'), train=False),
         }
 
     def _generate_examples(self, source_path, train) -> Iterator[Tuple[str, Any]]:
@@ -192,6 +192,11 @@ class LiberoVal(tfds.core.GeneratorBasedBuilder):
             demo_keys = demo_keys[:5]
         else:
             demo_keys = demo_keys[5:]
+        
+        # np_name = str(os.path.basename(source_path)).split('.')[0]
+        # print('\n'*3, np_name, demo_keys, '\n'*3)
+        # np.save(f'{np_name}_demo_keys.npy', demo_keys)
+
         task_name = DATASET_NAME
         for demo_id in demo_keys:
             yield _parse_example(demo_id, task_name)

@@ -22,9 +22,6 @@ from octo.utils.train_utils import (
 )
 
 from flatten_dict import flatten, unflatten
-from ipdb import set_trace as bp
-from ipdb import launch_ipdb_on_exception
-from IPython import embed
 
 from streaming import MDSWriter
 from tqdm import tqdm
@@ -36,14 +33,11 @@ try:
 except ImportError:
     pass
 
-from ipdb import set_trace as bp
-from IPython import embed
 
 import flags_config
 FLAGS = flags.FLAGS
 
 TRAIN=True
-# TRAIN=False
 
 columns = {
     'absolute_action_mask': 'ndarray:uint8',
@@ -79,49 +73,10 @@ def make_replay_dataset(train: bool=True):
     # prevent tensorflow from using GPU memory since it's only used for data loading
     tf.config.set_visible_devices([], "GPU")
 
-    ############################################
-    ############ get text processor ############
-    ############################################
-    pretrained_model = OctoModel.load_pretrained(
-        FLAGS.config.pretrained_path,
-        step=FLAGS.config.pretrained_step,
-    )
-
-    flat_config = flax.traverse_util.flatten_dict(
-        pretrained_model.config, keep_empty_nodes=True
-    )
-    for d_key in flax.traverse_util.flatten_dict(
-        FLAGS.config.get("config_delete_keys", ConfigDict()).to_dict()
-    ):
-        for c_key in list(flat_config.keys()):
-            if ".".join(c_key).startswith(".".join(d_key)):
-                del flat_config[c_key]
-
-    config = ConfigDict(flax.traverse_util.unflatten_dict(flat_config))
-    config.update(FLAGS.config.get("update_config", ConfigDict()))
-    config = config.to_dict()
-    check_config_diff(config, pretrained_model.config)
-
     if train:
         dataset_kwargs = FLAGS.config.dataset_kwargs
-        dataset_kwargs['data_dir'] = '/mnt/xfs/home/alaakh/store/oxe/train_val_splits/train'
     else:
         dataset_kwargs = FLAGS.config.val_dataset_kwargs
-        dataset_kwargs['data_dir'] = '/mnt/xfs/home/alaakh/store/oxe/train_val_splits/val'
-
-    # create text processor
-    if config["text_processor"] is None:
-        text_processor = None
-    else:
-        text_processor = ModuleSpec.instantiate(config["text_processor"])()
-    ############################################
-
-    def process_batch(batch):
-        batch = process_text(batch, text_processor)
-        del batch["dataset_name"]
-        return batch
-
-    del pretrained_model
 
     # load standardize_fn from `path/to/file.py:fn_name` format
     if (
@@ -170,13 +125,16 @@ def make_replay_dataset(train: bool=True):
     return dataset
 
 def main(_):
-
-    ds_name = FLAGS.config.dataset_kwargs.name
-    # ds_path = FLAGS.config.dataset_kwargs.data_dir
-    if TRAIN:
-        ds_path = '/mnt/xfs/home/alaakh/store/oxe/train_val_splits/train'
+    #### NEVER USE THIS SCRIPT FOR TRAINING DATA. USE convert_mds_cluster.py INSTEAD ####
+    do_val = True
+    if do_val:
+        import sys
+        ds_name = os.path.basename(sys.argv[1])
+        FLAGS.config.dataset_kwargs.name = ds_name
     else:
-        ds_path = '/mnt/xfs/home/alaakh/store/oxe/train_val_splits/val'
+        ds_name = FLAGS.config.dataset_kwargs.name
+
+    ds_path = FLAGS.config.dataset_kwargs.data_dir
 
     print('dataset:', ds_name)
     print('path:', ds_path)
@@ -185,39 +143,16 @@ def main(_):
     dataset_statistics = dataset.dataset_statistics
     dataset = dataset.unbatch().iterator()
 
-    # i = 0
-    # columns = {}
-    # for item in dataset:
-    #     item_flat = flatten(item, 'dot')
-    #     for k, v in item_flat.items():
-    #         try:
-    #             columns[k] = f'ndarray:{v.numpy().dtype}'
-    #             print(k, ':', v.numpy().dtype, 'and', v.numpy().shape)
-    #         except:
-    #             if type(v) != bytes:
-    #                 columns[k] = f'ndarray:{v.dtype}'
-    #                 print(k, ':', v.dtype, 'and', v.shape)
-    #     print()
-    #     if i > 5:
-    #         break
-    #     i += 1
-
-    # bp()
-
-    # from pprint import pprint
-    # pprint(columns)
-
     target_size = 150 * 1024 * 1024 # 130MB
     item_size = 640 # 640B
     num_items = np.ceil(target_size / item_size)
     shard_size = int(num_items * item_size)
 
-    if TRAIN:
-        out_root = "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/train"
-    else:
-        out_root = "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/val"
+    out_root = "/mnt/hdd2/libero/mpt_dataset/"
+    if do_val:
+        out_root = os.path.join(out_root, 'libero_val_128x128')
 
-    out_path = os.path.join(out_root, ds_name)
+    out_path = os.path.join(out_root, ds_name)# + '_128x128')
     os.makedirs(out_path, exist_ok=True)
 
     with MDSWriter(columns=columns,
