@@ -1,32 +1,42 @@
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
+import os
 
-BATCH_SIZE = 128
-def get_config(config_string="full,language_conditioned"):
-    mode, task = config_string.split(",")
+def get_config(config_string="br,0.05"):
+    method_name, percent = config_string.split(',')
+    assert method_name in ['br', 'flow', 'action']
+
+    mode, task = "full", "language_conditioned"
     assert task in ["image_conditioned", "language_conditioned", "multimodal"]
     assert mode in ["full", "head_only", "head_mlp_only"]
 
-    # Fill this in for your own dataset!
+    data_dir = '/mnt/hdd2/baselines/target_data_chunk8'    
 
-    # There should be two image keys
-    # first image key should be the third-person view (None if not used)
-    # and second image key should be the wrist view (None if not used)
+    task_paths = [
+        'kitchen_scene3_turn_on_the_stove_and_put_the_moka_pot_on_it_h8_prechunk',
+        'kitchen_scene4_put_the_black_bowl_in_the_bottom_drawer_of_the_cabinet_and_close_it_h8_prechunk',
+        'kitchen_scene6_put_the_yellow_and_white_mug_in_the_microwave_and_close_it_h8_prechunk',
+        'kitchen_scene8_put_both_moka_pots_on_the_stove_h8_prechunk',
+        'living_room_scene1_put_both_the_alphabet_soup_and_the_cream_cheese_box_in_the_basket_h8_prechunk',
+        'living_room_scene2_put_both_the_alphabet_soup_and_the_tomato_sauce_in_the_basket_h8_prechunk',
+        'living_room_scene2_put_both_the_cream_cheese_box_and_the_butter_in_the_basket_h8_prechunk',
+        'living_room_scene5_put_the_white_mug_on_the_left_plate_and_put_the_yellow_and_white_mug_on_the_right_plate_h8_prechunk',
+        'living_room_scene6_put_the_white_mug_on_the_plate_and_put_the_chocolate_pudding_to_the_right_of_the_plate_h8_prechunk',
+        'study_scene1_pick_up_the_book_and_place_it_in_the_back_compartment_of_the_caddy_h8_prechunk',
+    ]
+
+    data_paths = []
+    for tp in task_paths:
+        data_paths.append([os.path.join(data_dir, f'{tp}/val', 'out.tfrecord')])
+    # target_train_path = os.path.join(data_dir, 'target_data/simpler_carrot_dataset_h8_prechunk/train', 'out.tfrecord')
+    # prior_train_path = os.path.join(data_dir, f'retrieved_data/simpler_carrot_dataset_h8_prechunk_th{percent}/{method_name}/out.tfrecord')
+
 
     FINETUNING_KWARGS = {
-        "name": "libero90_horizon15", #"libero90_horizon15", #"libero90",
-        "data_dir": "/home/shivin/tensorflow_datasets/", #,libero_val_selected_demos",
-        "image_obs_keys": {"primary": "image", "wrist": "wrist_image"},
-        "state_obs_keys": ["state"],
-        "language_key": "language_instruction",
-        "action_proprio_normalization_type": "normal",
-        # All actions are relative deltas, except for the last one (gripper) which is absolute
-        # Specifying this is only necessary if you want to predict > 1 step into the future
-        "absolute_action_mask": [False, False, False, False, False, False, True],
-        "action_normalization_mask": [True, True, True, True, True, True, False],
-        # standardize_fn is dynamically loaded from a file
-        "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:custom_dataset_transform",
-        "dataset_statistics": "/home/shivin/tensorflow_datasets/libero90/0.1.0/dataset_statistics_9abb65a9c7829f52c81741919ae39f05baf55b6a5aab3f0ddd897947d3b283e5.json"
+        "data_paths": data_paths, #[[prior_train_path], [target_train_path]],
+        "sample_weights": None, 
+        "load_keys": 'all',
+        "dataset_statistics_path": "/home/shivin/tensorflow_datasets/libero90/0.1.0/dataset_statistics_9abb65a9c7829f52c81741919ae39f05baf55b6a5aab3f0ddd897947d3b283e5.json",
     }
 
     if mode == "full":
@@ -44,26 +54,26 @@ def get_config(config_string="full,language_conditioned"):
     else:
         raise ValueError("Invalid mode")
 
-    max_steps = FieldReference(50_000)
+    max_steps = FieldReference(50000)
     window_size = FieldReference(default=1)
 
     config = dict(
         use_proprio=True,
+        action_chunks=4,
         pretrained_path=placeholder(str),
         pretrained_step=placeholder(int),
-        batch_size=BATCH_SIZE,
+        batch_size=128,
         shuffle_buffer_size=10000,
         num_steps=max_steps,
         log_interval=100,
         eval_interval=int(max_steps.get()//5),
         save_interval=int(max_steps.get()//5),
-        save_dir=f'/home/shivin/libero_experiments/experiments/',
+        save_dir='/home/shivin/libero_experiments/experiments/',
         seed=42,
         wandb=dict(
             project="octo_finetune", group=placeholder(str), entity=placeholder(str)
         ),
         dataset_kwargs=FINETUNING_KWARGS,
-        val_dataset_kwargs=FINETUNING_KWARGS,
         modality=task,
         finetuning_mode=mode,
         window_size=window_size,
@@ -86,36 +96,13 @@ def get_config(config_string="full,language_conditioned"):
             num_val_batches=16,
         ),
         viz_kwargs=dict(
-            eval_batch_size=BATCH_SIZE,
-            trajs_for_metrics=5,
-            trajs_for_viz=2,
+            eval_batch_size=128,
+            trajs_for_metrics=100,
+            trajs_for_viz=8,
             samples_per_state=8,
         ),
     )
 
-    if task == "image_conditioned":
-        goal_relabeling_strategy = "uniform"
-        keep_image_prob = 1.0
-    elif task == "language_conditioned":
-        goal_relabeling_strategy = None
-        keep_image_prob = 0.0
-    elif task == "multimodal":
-        goal_relabeling_strategy = "uniform"
-        keep_image_prob = 0.5
-    else:
-        raise ValueError("Invalid modality")
-
-    traj_transform_kwargs = dict(
-        window_size=window_size,
-        future_action_window_size=7,
-        goal_relabeling_strategy=goal_relabeling_strategy,
-        task_augment_strategy="delete_task_conditioning",
-        task_augment_kwargs=dict(
-            keep_image_prob=keep_image_prob,
-        ),
-        # If the default data loading speed is too slow, try these:
-        # num_parallel_calls=16,  # for less CPU-intensive ops
-    )
     workspace_augment_kwargs = dict(
         random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
         random_brightness=[0.1],
@@ -144,17 +131,18 @@ def get_config(config_string="full,language_conditioned"):
     )
     frame_transform_kwargs = dict(
         resize_size={
-            "primary": (128, 128),  # workspace (3rd person) camera is at 256x256
+            "primary": (256, 256),  # workspace (3rd person) camera is at 256x256
             "wrist": (128, 128),  # wrist camera is at 128x128
         },
-        image_augment_kwargs=dict(
-            # primary=workspace_augment_kwargs,
-            # wrist=wrist_augment_kwargs,
-        ),
+        image_augment_kwargs=[
+            workspace_augment_kwargs,
+            wrist_augment_kwargs,
+        ],
     )
     # If the default data loading speed is too slow, try these:
-    config["frame_transform_threads"] = 16  # for the most CPU-intensive ops (decoding, resizing, augmenting)
+    config[
+        "frame_transform_threads"
+    ] = 16  # for the most CPU-intensive ops (decoding, resizing, augmenting)
 
-    config["traj_transform_kwargs"] = traj_transform_kwargs
     config["frame_transform_kwargs"] = frame_transform_kwargs
     return ConfigDict(config)

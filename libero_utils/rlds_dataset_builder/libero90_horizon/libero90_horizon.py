@@ -8,8 +8,8 @@ import tensorflow_datasets as tfds
 import tensorflow_hub as hub
 from tqdm import tqdm
 
-HORIZON=30
-MIN_H = 10
+HORIZON=30 # 15
+MIN_H = 10 # 8
 DATA_DIR = '/mnt/hdd2/libero/'
 
 def chunk_traj(traj, chunk_size):
