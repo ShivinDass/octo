@@ -34,26 +34,14 @@ do
     for seed in 0 1 2 3 4; do
 
         action_chunks=8
-        # task_name=kitchen_scene4_put_the_black_bowl_in_the_bottom_drawer_of_the_cabinet_and_close_it_h8_prechunk
-        # task_shorthand=bowl-cabinet
-        
-        # task_name=living_room_scene5_put_the_white_mug_on_the_left_plate_and_put_the_yellow_and_white_mug_on_the_right_plate_h8_prechunk
-        # task_shorthand=mug-mug
-        
-        # task_name=study_scene1_pick_up_the_book_and_place_it_in_the_back_compartment_of_the_caddy_h8_prechunk
-        # task_shorthand=book-caddy
-
-        task_name=kitchen_scene8_put_both_moka_pots_on_the_stove_h8_prechunk
-        task_shorthand=moka-moka
-        # ITER=10
         for ITER in 30; do
-            TASK_PATH=libero90_horizon30/${task_shorthand}_iter${ITER}_top0.1.tfrecord
+            TASK_PATH=libero90_horizon15/${task_shorthand}_iter${ITER}_top0.1.tfrecord
             python scripts/finetune_retrieved.py \
             --config scripts/configs/retrieved_finetune_config/retrieved_finetune_libero_co_training_config.py:${task_name},${TASK_PATH} \
             --config.action_chunks=$action_chunks \
             --config.seed $seed \
             --config.save_dir /mnt/hdd2/libero/experiments/${task_shorthand}_dm/  \
-            --config.pretrained_path=hf://rail-berkeley/octo-small --name seed${seed}_libero_${task_shorthand}_h1_dm0.1-training_w30_n${ITER} \
+            --config.pretrained_path=hf://rail-berkeley/octo-small --name seed${seed}_libero_${task_shorthand}_h1_dm0.1-training_w15_n${ITER} \
             --debug true \
 
         done
