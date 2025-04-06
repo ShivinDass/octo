@@ -49,6 +49,9 @@ def replay_forward(saved_states, train_its, train_batcher, serialize_k,
 
     iterator = tqdm(range(start_it, train_its))
     save_iterations = make_save_iterations(start_it, train_its, serialize_k)
+    ### CHANGE 1 ###
+    save_iterations.add(start_it+1)
+    ### CHANGE 1 ###
 
     gpu_states = []
     old_cpu_states = None
@@ -332,7 +335,12 @@ def replay_stage(final_i, start_i, train_batcher, psl_train, state_to_vjp_skele,
     for curr_it in tqdm(range(start_i, final_i), desc=desc):
         batch, minibatches = next(batches_iterator)
         saved_batches[curr_it] = batch
-        if curr_it < final_i - 1:
+        ### CHANGE 2 ###
+        if (curr_it < final_i - 1) and (curr_it + 1) in saved_states:
+            # we already saved the next state
+            state = jax.device_put(saved_states[curr_it+1], replicated_sharding)
+        ### CHANGE 2 ###
+        elif curr_it < final_i - 1:
             state = functional_step(state, minibatches, psl_train)
             state_it = curr_it + 1
             gpu_states[state_it] = state

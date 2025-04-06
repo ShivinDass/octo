@@ -80,11 +80,17 @@ def make_model(data_batcher: Callable):
         example_batch = batch.batch
         break
 
-    ds_stat_path = os.path.join(
-        FLAGS.config.dataset_kwargs.data_dir,
-        FLAGS.config.dataset_kwargs.name,
-        'dataset_statistics.json'
-    )
+    if '-' not in FLAGS.config.dataset_kwargs.all_train_datasets:
+        ds_stat_path = os.path.join(
+            FLAGS.config.dataset_kwargs.data_dir,
+            FLAGS.config.dataset_kwargs.name,
+            'dataset_statistics.json'
+        )
+    else:
+        ds_stat_path = os.path.join(
+            FLAGS.config.dataset_kwargs.data_dir,
+            'dataset_statistics.json'
+        )
 
     with open(ds_stat_path, 'r') as f:
        dataset_statistics = json.load(f)
@@ -130,7 +136,7 @@ def make_model(data_batcher: Callable):
             trainable_params[key] = flat_params[key]
 
     frozen_params = flax.traverse_util.unflatten_dict(frozen_params)
-    trainable_params = flax.traverse_util.unflatten_dict(trainable_params)
+    trainable_params = flax.traverse_util.unflatten_dict(trainable_params) 
 
     return model, frozen_params, trainable_params
 

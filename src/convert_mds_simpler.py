@@ -102,10 +102,13 @@ def make_replay_dataset(train: bool=True):
     config = config.to_dict()
     check_config_diff(config, pretrained_model.config)
 
+    bp()
+
     if train:
         dataset_kwargs = FLAGS.config.dataset_kwargs
-        dataset_kwargs['data_dir'] = '/mnt/xfs/home/alaakh/store/oxe/train_val_splits/train'
+        dataset_kwargs['data_dir'] = '/mnt/xfs/home/alaakh/store/oxe/traj_simpler'
     else:
+        raise NotImplementedError
         dataset_kwargs = FLAGS.config.val_dataset_kwargs
         dataset_kwargs['data_dir'] = '/mnt/xfs/home/alaakh/store/oxe/train_val_splits/val'
 
@@ -171,11 +174,13 @@ def make_replay_dataset(train: bool=True):
 
 def main(_):
 
-    ds_name = FLAGS.config.dataset_kwargs.name
+    # ds_name = FLAGS.config.dataset_kwargs.name
+    ds_name = "simpler_carrot_dataset"
     # ds_path = FLAGS.config.dataset_kwargs.data_dir
     if TRAIN:
-        ds_path = '/mnt/xfs/home/alaakh/store/oxe/train_val_splits/train'
+        ds_path = '/mnt/xfs/home/alaakh/store/oxe/traj_simpler'
     else:
+        raise NotImplementedError
         ds_path = '/mnt/xfs/home/alaakh/store/oxe/train_val_splits/val'
 
     print('dataset:', ds_name)
@@ -213,11 +218,9 @@ def main(_):
     shard_size = int(num_items * item_size)
 
     if TRAIN:
-        # out_root = "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/train"
-        out_root = "/mnt/nfs/home/alaakh/store/oxe/mpt_dataset/train"
+        out_root = "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/train"
     else:
-        # out_root = "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/val"
-        out_root = "/mnt/nfs/home/alaakh/store/oxe/mpt_dataset/val"
+        out_root = "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/val"
 
     out_path = os.path.join(out_root, ds_name)
     os.makedirs(out_path, exist_ok=True)

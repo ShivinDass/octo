@@ -7,8 +7,10 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("name", "experiment", "Experiment name.")
 flags.DEFINE_bool("debug", False, "Debug config (no wandb logging)")
 
+config_path = os.environ.get('CONFIG_PATH', "/mnt/xfs/home/alaakh/src/octo_dir/octo/scripts/configs/dm_finetune_config.py")
+
 default_config_file = os.path.join(
-    "/mnt/xfs/home/alaakh/src/octo_dir/octo/scripts/configs/dm_finetune_config.py"
+    config_path    
 )
 config_flags.DEFINE_config_file(
     "config",

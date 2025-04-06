@@ -35,17 +35,21 @@ from IPython import embed
 import flags_config
 FLAGS = flags.FLAGS
 
-from typing import Callable, Any
+
+from streaming import Stream
+from typing import Callable, Any, Optional, Sequence
 class OctoDataset(StreamingDataset):
     def __init__(self,
-                 remote: str,
-                 local: str,
-                 shuffle: bool,
-                 batch_size: int,
-                 transforms: Callable=None,
+                 streams: Optional[Sequence[Stream]] = None,
+                 remote: Optional[str] = None,
+                 local: Optional[str] = None,
+                 shuffle: Optional[bool] = None,
+                 batch_size: Optional[int] = None,
+                 transforms: Optional[Callable] = None,
                  **kwargs,
                 ) -> None:
         super().__init__(
+            streams=streams,
             local=local,
             remote=remote,
             shuffle=shuffle,
@@ -174,6 +178,12 @@ def make_replay_dataset(start_batch: int,
                         train: bool=True,
                         return_dw_only: bool=False):
 
+    unique_indices = np.empty(1_000_000)
+    data_weights = jax.numpy.ones((len(unique_indices),), dtype=jnp.float32)
+
+    if return_dw_only:
+        return None, data_weights
+
     # initialize_compilation_cache()
     # prevent tensorflow from using GPU memory since it's only used for data loading
     tf.config.set_visible_devices([], "GPU")
@@ -227,10 +237,14 @@ def make_replay_dataset(start_batch: int,
 
     del pretrained_model
 
-    if train:
+    if train and '-' not in FLAGS.config.dataset_kwargs.all_train_datasets:
         mds_path = os.path.join(
             FLAGS.config.dataset_kwargs.data_dir,
             FLAGS.config.dataset_kwargs.name,
+        )
+    elif train and '-' in FLAGS.config.dataset_kwargs.all_train_datasets:
+        mds_path = os.path.join(
+            FLAGS.config.dataset_kwargs.data_dir,
         )
     else:
         mds_path = os.path.join(
@@ -243,15 +257,54 @@ def make_replay_dataset(start_batch: int,
     else:
         batch_size = FLAGS.config.val_batch_size
 
-    # dataset = StreamingDataset(
-    dataset = OctoDataset(
-        local=mds_path,
-        remote=None,
-        shuffle=train,
-        shuffle_seed=FLAGS.config.seed,
-        batch_size=batch_size,
-        transforms=process_item,
-    )
+    if train and FLAGS.config.include_index_path is not None:
+        index_filename = FLAGS.config.include_index_path
+    else:
+        index_filename = ''
+
+    ###########################################################
+    if train and '-' in FLAGS.config.dataset_kwargs.all_train_datasets:
+        # only use streams for testing if it works for now
+        p = 0.01
+        streams = [
+            Stream( # this is the stream corresponding to the mds data path
+                remote=None,
+                local=mds_path, 
+                proportion=1-p,
+                index_filename=index_filename
+            ),
+            Stream(
+                remote=None,
+                local=os.path.join(FLAGS.config.dataset_kwargs.data_dir, 'easy_pick_dataset_n5_1'), 
+                proportion=p,
+                index_filename='index.json'
+            ),
+        ]
+
+        dataset = OctoDataset(
+            # local=mds_path,
+            streams=streams,
+            remote=None,
+            local=None,
+            shuffle=train,
+            shuffle_seed=FLAGS.config.seed,
+            batch_size=batch_size,
+            transforms=process_item,
+            index_filename=index_filename,
+        )
+
+    else:
+        # dataset = StreamingDataset(
+        dataset = OctoDataset(
+            local=mds_path,
+            remote=None,
+            shuffle=train,
+            shuffle_seed=FLAGS.config.seed,
+            batch_size=batch_size,
+            transforms=process_item,
+            index_filename=index_filename,
+        )
+    ###########################################################
 
     def numpy_collate(batch):
         return {
@@ -261,7 +314,8 @@ def make_replay_dataset(start_batch: int,
 
     dataloader = StreamingDataLoader(
         dataset,
-        drop_last=train,
+        # drop_last=train,
+        drop_last=True,
         batch_size=batch_size,
         num_workers=FLAGS.config.num_workers,
         prefetch_factor=2,  # Optional: controls samples prefetched per worker
@@ -280,12 +334,6 @@ def make_replay_dataset(start_batch: int,
     }
 
     dataloader.load_state_dict(state)
-
-    unique_indices = np.empty(1_000_000)
-    data_weights = jax.numpy.ones((len(unique_indices),), dtype=jnp.float32)
-
-    if return_dw_only:
-        return None, data_weights
 
     return dataloader, data_weights
 
@@ -347,10 +395,15 @@ def make_special_dataset(start_batch: int,
 
     del pretrained_model
 
-    mds_path = os.path.join(
-        FLAGS.config.dataset_kwargs.data_dir,
-        FLAGS.config.dataset_kwargs.name,
-    )
+    if '-' not in FLAGS.config.dataset_kwargs.all_train_datasets:
+        mds_path = os.path.join(
+            FLAGS.config.dataset_kwargs.data_dir,
+            FLAGS.config.dataset_kwargs.name,
+        )
+    elif '-' in FLAGS.config.dataset_kwargs.all_train_datasets:
+        mds_path = os.path.join(
+            FLAGS.config.dataset_kwargs.data_dir,
+        )
 
     checkpoint_path = FLAGS.config.checkpoint_path
     special_index_path = os.path.join(
@@ -722,6 +775,8 @@ def create_special_index(iter_seed:int=0):
         FLAGS.config.dataset_kwargs.name,
         'index.json'
     )
+
+    index_path = FLAGS.config.include_index_path
 
     with open(index_path, 'r') as f:
         index = json.load(f)

@@ -42,6 +42,8 @@ from IPython import embed
 import flags_config
 FLAGS = flags.FLAGS
 
+from dataset_configs import configs
+
 TRAIN=True
 # TRAIN=False
 
@@ -171,66 +173,75 @@ def make_replay_dataset(train: bool=True):
 
 def main(_):
 
-    ds_name = FLAGS.config.dataset_kwargs.name
     # ds_path = FLAGS.config.dataset_kwargs.data_dir
     if TRAIN:
-        ds_path = '/mnt/xfs/home/alaakh/store/oxe/train_val_splits/train'
+        # ds_path = '/mnt/xfs/home/alaakh/store/oxe/train_val_splits/train'
+        ds_path = '/mnt/nfs/home/alaakh/store/oxe/train_val_splits/train'
     else:
-        ds_path = '/mnt/xfs/home/alaakh/store/oxe/train_val_splits/val'
+        # ds_path = '/mnt/xfs/home/alaakh/store/oxe/train_val_splits/val'
+        ds_path = '/mnt/nfs/home/alaakh/store/oxe/train_val_splits/val'
+ 
+    job_id = int(os.environ.get('JOB_ID', None))
+    config = configs[job_id]
 
-    print('dataset:', ds_name)
-    print('path:', ds_path)
+    errored = False
+    try:
+        FLAGS.config.dataset_kwargs.name = config['name']
+        FLAGS.config.dataset_kwargs.standardize_fn = config['standardize_fn']
+        FLAGS.config.dataset_kwargs.image_obs_keys = ConfigDict(config['image_obs_keys'])
+        FLAGS.config.dataset_kwargs.state_obs_keys = config['state_obs_keys']
 
-    dataset = make_replay_dataset(train=TRAIN)
-    dataset_statistics = dataset.dataset_statistics
-    dataset = dataset.unbatch().iterator()
+        ds_name = FLAGS.config.dataset_kwargs.name
 
-    # i = 0
-    # columns = {}
-    # for item in dataset:
-    #     item_flat = flatten(item, 'dot')
-    #     for k, v in item_flat.items():
-    #         try:
-    #             columns[k] = f'ndarray:{v.numpy().dtype}'
-    #             print(k, ':', v.numpy().dtype, 'and', v.numpy().shape)
-    #         except:
-    #             if type(v) != bytes:
-    #                 columns[k] = f'ndarray:{v.dtype}'
-    #                 print(k, ':', v.dtype, 'and', v.shape)
-    #     print()
-    #     if i > 5:
-    #         break
-    #     i += 1
+        # MOUNT='xfs'
+        MOUNT='nfs'
+        if TRAIN:
+            out_root = f"/mnt/{MOUNT}/home/alaakh/store/oxe/mpt_dataset/train"
+        else:
+            out_root = f"/mnt/{MOUNT}/home/alaakh/store/oxe/mpt_dataset/val"
 
-    # bp()
+        dataset_mds_path = os.path.join(out_root, ds_name)
+        os.makedirs(dataset_mds_path, exist_ok=True)
+        
+        print('############## dataset:', ds_name)
+        print('############## path:', ds_path)
 
-    # from pprint import pprint
-    # pprint(columns)
+        dataset = make_replay_dataset(train=TRAIN)
+        dataset_statistics = dataset.dataset_statistics
+        dataset = dataset.unbatch().iterator()
 
-    target_size = 150 * 1024 * 1024 # 130MB
-    item_size = 640 # 640B
-    num_items = np.ceil(target_size / item_size)
-    shard_size = int(num_items * item_size)
+        # from pprint import pprint
+        # pprint(columns)
 
-    if TRAIN:
-        # out_root = "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/train"
-        out_root = "/mnt/nfs/home/alaakh/store/oxe/mpt_dataset/train"
-    else:
-        # out_root = "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/val"
-        out_root = "/mnt/nfs/home/alaakh/store/oxe/mpt_dataset/val"
+        # target_size = 150 * 1024 * 1024 # 130MB
+        # item_size = 640 # 640B
+        # num_items = np.ceil(target_size / item_size)
+        # shard_size = int(num_items * item_size)
 
-    out_path = os.path.join(out_root, ds_name)
-    os.makedirs(out_path, exist_ok=True)
+        TOTAL_SUBFOLDERS = 0
+        MAX_FOLDERS_PER_DIRECTORY = 3000
 
-    with MDSWriter(columns=columns,
-                out=out_path,
-                size_limit=shard_size) as out:
-
-        i = 0
-        # for item in tqdm(dataset, total=dataset.cardinality().numpy()):
+        prev_index = None
+        writer = None
         for item in tqdm(dataset):
-        # for sample in loader:
-            # out.write({'tokens': sample['tokens'][0]})
+            current_index = item['index']
+
+            if current_index != prev_index:
+
+                TOTAL_SUBFOLDERS += 1
+                CURRENT_DIRECTORY, CURRENT_FOLDERS_PER_SUBDIRECTORY = divmod(TOTAL_SUBFOLDERS, MAX_FOLDERS_PER_DIRECTORY)
+
+                if writer is not None:
+                    writer.finish()
+                    del writer
+
+                out_path = os.path.join(dataset_mds_path, str(CURRENT_DIRECTORY), str(current_index))
+                assert not os.path.exists(out_path), "otherwise, need to maneuver to write in existing traj folder"
+
+                writer = MDSWriter(columns=columns, out=out_path)
+
+            prev_index = current_index
+
             item_flat = {}
             for k, v in flatten(item, 'dot').items():
                 if k in ['dataset_name', 'task.language_instruction']:
@@ -240,24 +251,41 @@ def main(_):
                     # item_flat[k] = v.numpy().astype(target_dtypes[k])
                     item_flat[k] = v.astype(target_dtypes[k])
 
-            out.write(item_flat)
+            writer.write(item_flat)
 
-            i += 1
 
             # if i > 100:
             #     break
 
-    def numpy_to_list(obj):
-        if isinstance(obj, dict):
-            return {k: numpy_to_list(v) for k, v in obj.items()}
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        return obj
+        def numpy_to_list(obj):
+            if isinstance(obj, dict):
+                return {k: numpy_to_list(v) for k, v in obj.items()}
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            return obj
 
-    dataset_statistics = numpy_to_list(dataset_statistics)
-    json_path = os.path.join(out_path, 'dataset_statistics.json')
-    with open(json_path, 'w') as f:
-        json.dump(dataset_statistics, f, indent=4)
+        dataset_statistics = numpy_to_list(dataset_statistics)
+        json_path = os.path.join(dataset_mds_path, 'dataset_statistics.json')
+        with open(json_path, 'w') as f:
+            json.dump(dataset_statistics, f, indent=4)
+
+        print(f'Processed: {TOTAL_SUBFOLDERS}')
+        print('=> Done')
+
+    except:
+        cmd = f'rm -r {dataset_mds_path}'
+        os.system(cmd)
+
+        errored = True
+
+        print('Dataset errored!!!!!!!')
+
+    if errored:
+        file_path = '/mnt/nfs/home/alaakh/store/oxe/errored.txt'
+        mode = 'a' if os.path.exists(file_path) else 'w'
+
+        with open(file_path, mode) as f:
+            f.write(f'{ds_name}\n')
 
 if __name__ == "__main__":
     app.run(main)
