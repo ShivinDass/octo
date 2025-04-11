@@ -275,7 +275,8 @@ def make_replay_dataset(start_batch: int,
             ),
             Stream(
                 remote=None,
-                local=os.path.join(FLAGS.config.dataset_kwargs.data_dir, 'easy_pick_dataset_n5_1'), 
+                # local=os.path.join(FLAGS.config.dataset_kwargs.data_dir, 'easy_pick_dataset_n5_1'), 
+                local=os.path.join(FLAGS.config.dataset_kwargs.data_dir, 'deo_in_pouch_dataset_first10_128x128'), 
                 proportion=p,
                 index_filename='index.json'
             ),

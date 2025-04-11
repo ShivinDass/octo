@@ -445,6 +445,9 @@ def create_original_index():
         ##################################################################
         if 'easy_pick' in dataset_name:
             continue
+
+        if 'deo_in_pouch' in dataset_name:
+            continue
         ##################################################################
 
         dataset_index_path = os.path.join(

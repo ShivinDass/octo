@@ -15,50 +15,156 @@ def get_config(config_string="full,language_conditioned"): # new
     # and second image key should be the wrist view (None if not used)
 
     FINETUNING_KWARGS = {
-        "name": "bridge_dataset",
-        # "data_dir": "./tests/debug_dataset",
+        # "name": "bridge_dataset",
+        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/train",
+        # "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:bridge_dataset_transform",
+        # "image_obs_keys": {"primary": "image_0", "wrist": None},
+        # "state_obs_keys": ["state"],
 
-        "data_dir": "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/train",
-        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/traj_data",
+        # "name": "utaustin_mutex",
+        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/train",
+        # "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:utaustin_mutex_dataset_transform",
+        # "image_obs_keys": {"primary": "image", "wrist": "wrist_image"},
+        # # "state_obs_keys": ["state", None],
+        # "state_obs_keys": ["state"],
 
-        "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:bridge_dataset_transform",
-        "image_obs_keys": {"primary": "image_0", "wrist": None},
-        "state_obs_keys": ["state", None],
+        # "name": "austin_sailor_dataset_converted_externally_to_rlds",
+        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/train",
+        # "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:austin_sailor_dataset_transform",
+        # "image_obs_keys": {"primary": "image", "wrist": "wrist_image"},
+        # # "state_obs_keys": ["state", None],
+        # "state_obs_keys": ["state"],
+
+        # "name": "austin_sirius_dataset_converted_externally_to_rlds",
+        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/train",
+        # "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:austin_sirius_dataset_transform",
+        # "image_obs_keys": {"primary": "image", "wrist": "wrist_image"},
+        # # "state_obs_keys": ["state", None],
+        # "state_obs_keys": ["state"],
+
+        # "name": "austin_buds_dataset_converted_externally_to_rlds",
+        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/train",
+        # "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:austin_buds_dataset_transform",
+        # "image_obs_keys": {"primary": "image", "wrist": "wrist_image"},
+        # # "state_obs_keys": ["state", None],
+        # "state_obs_keys": ["state"],
+
+
+        # "name": "jaco_play",
+        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/train",
+        # "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:jaco_play_dataset_transform",
+        # "image_obs_keys": {"primary": "image", "wrist": "image_wrist"},
+        # "state_obs_keys": ["state_eef", None, "state_gripper"],
+        # # "state_obs_keys": ["state_eef"], ### why not this?
+
+
+        # "name": "viola",
+        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/train",
+        # "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:viola_dataset_transform",
+        # "image_obs_keys": {"primary": "agentview_rgb", "wrist": "eye_in_hand_rgb"},
+        # "state_obs_keys": ["joint_states", "gripper_states"],
+        # # "state_obs_keys": ["state_eef"], ### why not this?
+
+
+
+        ################################################################
+        #################### FOR RUNNING REAL WORLD ####################
+        ################################################################ 
+        
+        # "exp_save_dir": "first_set",
+        # "name": (
+        #     "utaustin_mutex-"
+        #     "austin_sailor_dataset_converted_externally_to_rlds-"
+        #     "austin_sirius_dataset_converted_externally_to_rlds-"
+        #     "austin_buds_dataset_converted_externally_to_rlds-"
+        #     "easy_pick_dataset_n5_1"
+        # ),
+        # "data_dir": "/mnt/nfs/home/alaakh/store/oxe/mpt_dataset/train",
+        # "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:austin_buds_dataset_transform",
+        # "image_obs_keys": {"primary": "image", "wrist": "wrist_image"},
+        # # "state_obs_keys": ["state", None],
+        # "state_obs_keys": ["state"],
+
+        "name": "second_set",
+        "all_train_datasets": (
+            "austin_buds_dataset_converted_externally_to_rlds-"
+            "austin_sailor_dataset_converted_externally_to_rlds-"
+            "austin_sirius_dataset_converted_externally_to_rlds-"
+            "bc_z-"
+            "berkeley_autolab_ur5-"
+            "berkeley_cable_routing-"
+            "berkeley_fanuc_manipulation-"
+            "bridge_dataset-"
+            "cmu_stretch-"
+            "dlr_edan_shared_control_converted_externally_to_rlds-"
+            "fractal20220817_data-"
+            "furniture_bench_dataset_converted_externally_to_rlds-"
+            "iamlab_cmu_pickup_insert_converted_externally_to_rlds-"
+            "jaco_play-"
+            "nyu_door_opening_surprising_effectiveness-"
+            "nyu_franka_play_dataset_converted_externally_to_rlds-"
+            "roboturk-"
+            "stanford_hydra_dataset_converted_externally_to_rlds-"
+            "taco_play-"
+            "toto-"
+            "ucsd_kitchen_dataset_converted_externally_to_rlds-"
+            "utaustin_mutex-"
+            "viola-"
+            "deo_in_pouch_dataset_first10_128x128"
+            # "easy_pick_dataset_n5_1"
+        ),
+        "data_dir": "/mnt/nfs/home/alaakh/store/oxe/mpt_dataset/train",
+        "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:austin_buds_dataset_transform",
+        "image_obs_keys": {"primary": "image", "wrist": "wrist_image"},
+        # "state_obs_keys": ["state", None],
+        "state_obs_keys": ["state"],
+
+        # "name": "easy_pick_dataset_n5_1",
+        # "data_dir": "/mnt/nfs/home/alaakh/store/oxe/mpt_dataset/train",
+        # "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:custom_dataset_transform", 
+        # "image_obs_keys": {"primary": "image", "wrist": "wrist_image"},
+        # "state_obs_keys": ["state"],
 
         "language_key": "language_instruction",
         "action_proprio_normalization_type": "normal",
-        # All actions are relative deltas, except for the last one (gripper) which is absolute
-        # Specifying this is only necessary if you want to predict > 1 step into the future
         "absolute_action_mask": [False, False, False, False, False, False, True],
-        # standardize_fn is dynamically loaded from a file
-        # for example: "experiments/kevin/custom_standardization_transforms.py:aloha_dataset_transform"
-        # If the default data loading speed is too slow, try these:
-        # "num_parallel_reads": 8,  # for reading from disk / GCS
-        # "num_parallel_calls": 16,  # for initial dataset construction
+        "action_normalization_mask": [True, True, True, True, True, True, False],    
     }
 
     FINETUNING_VAL_KWARGS = {
-        "name": "bridge_dataset",
+        # "name": "bridge_dataset",
         # "data_dir": "./tests/debug_dataset",
         # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/traj_data",
         # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/train_val_splits/train",
         # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/train_val_splits/val",
-        "data_dir": "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/val",
+        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/mpt_dataset/val",
 
-        "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:bridge_dataset_transform",
-        "image_obs_keys": {"primary": "image_0", "wrist": None},
-        "state_obs_keys": ["state", None],
+        # "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:bridge_dataset_transform",
+        # "image_obs_keys": {"primary": "image_0", "wrist": None},
+        # "state_obs_keys": ["state", None],
+        # "language_key": "language_instruction",
+        # "action_proprio_normalization_type": "normal",
+        # "absolute_action_mask": [False, False, False, False, False, False, True],
 
+        # "name": "easy_pick_dataset_n10",
+        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/real_data",
+
+        # easy pick last
+        # "name": "easy_pick_dataset_n5_2",
+        # "data_dir": "/mnt/xfs/home/alaakh/store/oxe/real_data_splits/easy_pick",
+
+        # deo
+        "name": "deo_in_pouch_dataset_last10_128x128",
+        "data_dir": "/mnt/xfs/home/alaakh/store/oxe/real_data_splits/deo_in_pouch",
+
+        "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:custom_dataset_transform", 
+        "image_obs_keys": {"primary": "image", "wrist": "wrist_image"},
+        "state_obs_keys": ["state"],
+        # "state_obs_keys": ["state", None],
         "language_key": "language_instruction",
         "action_proprio_normalization_type": "normal",
-        # All actions are relative deltas, except for the last one (gripper) which is absolute
-        # Specifying this is only necessary if you want to predict > 1 step into the future
         "absolute_action_mask": [False, False, False, False, False, False, True],
-        # standardize_fn is dynamically loaded from a file
-        # for example: "experiments/kevin/custom_standardization_transforms.py:aloha_dataset_transform"
-        # If the default data loading speed is too slow, try these:
-        # "num_parallel_reads": 8,  # for reading from disk / GCS
-        # "num_parallel_calls": 16,  # for initial dataset construction
+        "action_normalization_mask": [True, True, True, True, True, True, False],
     }
 
     if mode == "full":
@@ -76,13 +182,15 @@ def get_config(config_string="full,language_conditioned"): # new
     else:
         raise ValueError("Invalid mode")
 
-    # max_steps = FieldReference(50000)
-    max_steps = FieldReference(10_000)
+    # max_steps = FieldReference(50_000)
+    # max_steps = FieldReference(10_000)
     # max_steps = FieldReference(5_000)
+    # max_steps = FieldReference(3_800)
     # max_steps = FieldReference(2_000)
-    # max_steps = FieldReference(100)
+    max_steps = FieldReference(5_000)
+    # max_steps = FieldReference(5)
     # window_size = FieldReference(default=1) # old
-    window_size = FieldReference(default=2) # new
+    window_size = FieldReference(default=1) # new
 
     config = dict(
         pretrained_path=placeholder(str),
@@ -95,18 +203,20 @@ def get_config(config_string="full,language_conditioned"): # new
         # num_workers=48,
         num_workers=64,
 
-        batch_size=512,
+        batch_size=256,
         mini_batch_size=128,
-        val_batch_size=16,
-        mini_val_batch_size=16,
+        val_batch_size=32,
+        mini_val_batch_size=32,
         # batch_size=128,
         shuffle_buffer_size=10000,
+
         num_steps=max_steps,
-        # bob_steps=10,
         bob_steps=100,
-        # bob_steps=150,
-        # bob_steps=200,
-        candidate_size=1,
+        # bob_steps=4,
+        # bob_steps=2,
+
+        # candidate_size=1,
+        candidate_size=0.125,
 
         # num_steps=30,
         # bob_steps=2,
@@ -207,7 +317,8 @@ def get_config(config_string="full,language_conditioned"): # new
     )
     frame_transform_kwargs = dict(
         resize_size={
-            "primary": (256, 256),  # workspace (3rd person) camera is at 256x256
+            # "primary": (256, 256),  # workspace (3rd person) camera is at 256x256
+            "primary": (128, 128),  # workspace (3rd person) camera is at 256x256
             "wrist": (128, 128),  # wrist camera is at 128x128
         },
         image_augment_kwargs=[
