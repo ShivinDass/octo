@@ -304,8 +304,12 @@ def make_dataset_from_rlds(
 
     def restructure(traj):
         sample_index = None
+        sample_weights = None
         if "index" in traj:
-            sample_index = traj["index"]
+            sample_index = traj["index"] #+ 46705
+        
+        if "weights" in traj:
+            sample_weights = traj["weights"]
 
         # apply a standardization function, if provided
         if standardize_fn is not None:
@@ -366,6 +370,8 @@ def make_dataset_from_rlds(
 
         if sample_index is not None:
             traj["index"] = sample_index[:traj_len]
+        if sample_weights is not None:
+            traj["weights"] = sample_weights[:traj_len]
 
         if absolute_action_mask is not None:
             if len(absolute_action_mask) != traj["action"].shape[-1]:

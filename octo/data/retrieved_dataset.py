@@ -106,8 +106,10 @@ class RetrievedOctoDataset:
         
         if isinstance(load_keys, str) and load_keys=='all':
             load_keys = get_all_dataset_keys(data_paths[0][0])
+        load_keys.remove('is_suboptimal')
 
         print("\n==> Loading keys", load_keys, f"from {data_paths}")
+        print("Sample weights", sample_weights)
 
         self.PROTO_TYPE_SPEC = {
             k: get_dtype_from_key(k) for k in load_keys

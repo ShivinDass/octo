@@ -24,6 +24,17 @@ def seed_np_with_string(seed_string):
     # Set the seed for NumPy
     np.random.seed(seed_int)
 
+def upweight_grasp_states(actions):
+    gripper = actions[:, -1]
+
+    weights = np.ones(gripper.shape, dtype=np.float32)
+    for j in range(len(weights)-1):
+        # if gripper[j]==1 and gripper[j+1]==0:
+        if (gripper[j]==1 and gripper[j+1]==0) or (gripper[j]==0 and gripper[j+1]==1):
+            weights[j-19:j+1] = 2
+
+    return weights
+
 class LiberoVal(tfds.core.GeneratorBasedBuilder):
     """DatasetBuilder for example dataset."""
 
@@ -101,6 +112,11 @@ class LiberoVal(tfds.core.GeneratorBasedBuilder):
                         shape=(1,),
                         dtype=np.int32,
                         doc='Index of the trajectory in the dataset.'
+                    ),
+                    'weights': tfds.features.Tensor(
+                        shape=(1,),
+                        dtype=np.float32,
+                        doc='Weights for the actions, used for training.'
                     )
                 }),
                 'episode_metadata': tfds.features.FeaturesDict({
@@ -134,6 +150,10 @@ class LiberoVal(tfds.core.GeneratorBasedBuilder):
             actions = data['actions'][:].astype(np.float32)
             print(actions.shape)
             actions[:, -1] = (1 - actions[:, -1])/2
+
+            weights = upweight_grasp_states(actions)
+            print('upweighted states', np.sum(weights>1.5))
+
             data_len = actions.shape[0]
 
             primary_image = np.flip(data['obs']['agentview_rgb'][:].astype(np.uint8), axis=1)
@@ -162,7 +182,8 @@ class LiberoVal(tfds.core.GeneratorBasedBuilder):
                     'is_terminal': i == (data_len - 1),
                     'language_instruction': language_instruction,
                     # 'language_embedding': language_embedding,
-                    'index': np.array([self.traj_index], dtype=np.int32),
+                    'index': np.array([999_999_990 + self.traj_index], dtype=np.int32),
+                    'weights': np.array([weights[i]], dtype=np.float32)
                 })
 
             # cv2.imwrite('im.png', episode[0]['observation']['image'])
@@ -189,13 +210,13 @@ class LiberoVal(tfds.core.GeneratorBasedBuilder):
         seed_np_with_string(DATASET_NAME)
         demo_keys = np.random.permutation(demo_keys)
         if train:
-            demo_keys = demo_keys[:5]
+            demo_keys = demo_keys[:5] # [:10]
         else:
             demo_keys = demo_keys[5:]
         
         # np_name = str(os.path.basename(source_path)).split('.')[0]
         # print('\n'*3, np_name, demo_keys, '\n'*3)
-        # np.save(f'{np_name}_demo_keys.npy', demo_keys)
+        # np.save(f'{np_name}_demo_keys_all.npy', demo_keys)
 
         task_name = DATASET_NAME
         for demo_id in demo_keys:

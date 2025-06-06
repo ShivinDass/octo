@@ -13,9 +13,9 @@ def get_config(config_string="full,language_conditioned"):
     # and second image key should be the wrist view (None if not used)
 
     FINETUNING_KWARGS = {
-        "name": "easy_pick_dataset_n10", #"easy_pick_dataset_n10",
-        "data_dir": "/home/shivin/tensorflow_datasets",
-        "image_obs_keys": {"primary": "image", "wrist": "wrist_image"},
+        "name": "tiago_sink_dataset_last10",
+        "data_dir": "/mnt/hdd1/tensorflow_datasets",
+        "image_obs_keys": {"primary": "image", "wrist": None},
         "state_obs_keys": ["state"],
         "language_key": "language_instruction",
         "action_proprio_normalization_type": "normal",
@@ -26,8 +26,7 @@ def get_config(config_string="full,language_conditioned"):
         # standardize_fn is dynamically loaded from a file
         # for example: "experiments/kevin/custom_standardization_transforms.py:aloha_dataset_transform"
         "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:custom_dataset_transform",
-        "dataset_statistics": "/home/shivin/tensorflow_datasets/easy_pick_dataset_n10/0.1.0/dataset_statistics_fd38cefcf869387d8333828c30353151baec46175a4d169b37d61c85031ba36a.json",
-        # old stats: "dataset_statistics": "/home/shivin/tensorflow_datasets/easy_pick_dataset_n10/0.1.0/dataset_statistics_7f263ea7b63bc22b5d644da9d0f503ea0ad509cf109668b0e58c4e08144bcfa7.json",
+        "dataset_statistics": "/mnt/hdd1/tensorflow_datasets/tiago_sink_dataset_n20/0.1.0/dataset_statistics_93334bb80d2fe06e5631482ffb56fa3002471e1354622e38e3683129a0988191.json",
     }
 
     if mode == "full":

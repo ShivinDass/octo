@@ -7,11 +7,25 @@ import tensorflow as tf
 import tensorflow_datasets as tfds
 import tensorflow_hub as hub
 import cv2
+import json
 from tqdm import tqdm
+import hashlib
 
-DATA_DIR = '/mnt/hdd2/libero/'
+DATA_DIR = '/mnt/hdd2/libero/strap_retrieved/100'
+DATASET_NAME = os.environ['TASK_NAME']
 
-class Libero90(tfds.core.GeneratorBasedBuilder):
+def seed_np_with_string(seed_string):
+    # Convert the string to a hash
+    hash_value = hashlib.sha256(seed_string.encode()).digest()
+
+    # Convert the hash to an integer
+    seed_int = int.from_bytes(hash_value, byteorder='big')
+    seed_int = seed_int % (2**31 - 1)
+    
+    # Set the seed for NumPy
+    np.random.seed(seed_int)
+
+class LiberoStrap(tfds.core.GeneratorBasedBuilder):
     """DatasetBuilder for example dataset."""
 
     VERSION = tfds.core.Version('0.1.0')
@@ -103,21 +117,15 @@ class Libero90(tfds.core.GeneratorBasedBuilder):
     def _split_generators(self, dl_manager: tfds.download.DownloadManager):
         """Define data splits."""
         return {
-            'train': self._generate_examples(source_dir=os.path.join(DATA_DIR, 'libero_90')),
-            # 'val': self._generate_examples(path='/home/shivin/foundation_models/data/easy_pick_dataset/data_0_to_39.h5', train=False),
+            'train': self._generate_examples(source_path=os.path.join(DATA_DIR, DATASET_NAME + '_demo.hdf5'), train=True),
+            # 'val': self._generate_examples(source_path=os.path.join(DATA_DIR, DATASET_NAME + '_demo.hdf5'), train=False),
         }
 
-    def _generate_examples(self, source_dir) -> Iterator[Tuple[str, Any]]:
+    def _generate_examples(self, source_path, train) -> Iterator[Tuple[str, Any]]:
         """Generator of examples for each split."""
 
         def _parse_example(demo_id, task_name):
-            # TODO: the lang string needs to be fixed
-            split_file = task_name.split('SCENE')[1]
-            language_instruction = split_file[2:] if split_file[2] != '_' else split_file[3:] 
-            language_instruction = " ".join(language_instruction.split('_')[:-1])
-
-            # language_instruction = task_name.split('SCENE')[1][2:]
-            # language_instruction = " ".join(language_instruction.split('_')[:-1])
+            language_instruction = json.loads(demo_data[demo_id].attrs['ep_meta'])['lang']
             print(self.traj_index, language_instruction, '-', demo_id)
 
             # load raw data --> this should change for your dataset
@@ -170,17 +178,23 @@ class Libero90(tfds.core.GeneratorBasedBuilder):
             # if you want to skip an example for whatever reason, simply return None
             return self.traj_index, sample
 
-        task_list = sorted(os.listdir(source_dir))
-        for task in task_list:
-            task_name = task.split('.')[0]
-            # create list of all examples
-            f = h5py.File(os.path.join(source_dir, task), 'r')
-            demo_data = f['data']
+        
+        print(source_path)
+        # create list of all examples
+        f = h5py.File(source_path, 'r')
+        demo_data = f['data']
 
-            # for smallish datasets, use single-thread parsing
-            demo_ids = sorted(list(demo_data.keys()))
-            for demo_id in demo_ids:
-                yield _parse_example(demo_id, task_name)
-                self.traj_index += 1
+        demo_keys = sorted(list(demo_data.keys()))
+        
+        # seed_np_with_string(DATASET_NAME)
+        
+        # np_name = str(os.path.basename(source_path)).split('.')[0]
+        # print('\n'*3, np_name, demo_keys, '\n'*3)
+        # np.save(f'{np_name}_demo_keys.npy', demo_keys)
 
-            f.close()
+        task_name = DATASET_NAME
+        for demo_id in demo_keys:
+            yield _parse_example(demo_id, task_name)
+            self.traj_index += 1
+
+        f.close()

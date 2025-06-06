@@ -11,7 +11,7 @@ def get_config(config_string="br,0.05"):
 
     data_dir = '/mnt/hdd2/baselines/'
 
-    target_train_path = os.path.join(data_dir, f'target_data_chunk8/{task_name}/train', 'out.tfrecord')
+    target_train_path = os.path.join(data_dir, f'target_data_first5_chunk8/{task_name}/', 'out.tfrecord')
     # prior_train_path = os.path.join(data_dir, 'prior_data/libero90_chunk8_prechunk/out.tfrecord')
     prior_train_path = os.path.join(data_dir, f'retrieved_data_chunk8_dm/{task_path}')
     # prior_train_path = os.path.join(data_dir, f'retrieved_data_chunk8_random{ri}/out.tfrecord')
@@ -20,7 +20,7 @@ def get_config(config_string="br,0.05"):
         "data_paths": [[prior_train_path], [target_train_path]],
         "sample_weights": None, 
         "load_keys": 'all',
-        "dataset_statistics_path": "/home/shivin/tensorflow_datasets/libero90/0.1.0/dataset_statistics_9abb65a9c7829f52c81741919ae39f05baf55b6a5aab3f0ddd897947d3b283e5.json",
+        "dataset_statistics_path": "/mnt/hdd1/tensorflow_datasets/libero90/0.1.0/dataset_statistics_9abb65a9c7829f52c81741919ae39f05baf55b6a5aab3f0ddd897947d3b283e5.json",
     }
 
     if mode == "full":
@@ -89,7 +89,7 @@ def get_config(config_string="br,0.05"):
             frozen_keys=frozen_keys,
             grad_accumulation_steps=None,  # if you are using grad accumulation, you need to adjust max_steps accordingly
         ),
-        val_dataset_kwargs=VAL_DATASET_KWARGS,
+        # val_dataset_kwargs=VAL_DATASET_KWARGS,
         val_kwargs=dict(
             val_shuffle_buffer_size=1000,
             num_val_batches=16,

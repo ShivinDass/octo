@@ -247,7 +247,8 @@ def main(_):
     if do_val:
         out_root = os.path.join(out_root, 'libero_val')
 
-    out_path = os.path.join(out_root, ds_name+'_128x128')
+    suffix = '_128x128' if FLAGS.config.frame_transform_kwargs.resize_size.primary[0] == 128 else ""
+    out_path = os.path.join(out_root, ds_name+suffix)
 
     if True:
         os.makedirs(out_path, exist_ok=True)
@@ -286,7 +287,7 @@ def main(_):
         json_path = os.path.join(out_path, 'dataset_statistics.json')
         with open(json_path, 'w') as f:
             json.dump(dataset_statistics, f, indent=4)
-    
+    writer.finish()
 
     create_unified_index(out_path)
 

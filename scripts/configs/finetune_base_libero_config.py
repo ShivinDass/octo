@@ -14,7 +14,7 @@ def get_config(config_string="full,language_conditioned"):
     # and second image key should be the wrist view (None if not used)
 
     FINETUNING_KWARGS = {
-        "name": "libero90_horizon15", #"libero90_horizon15", #"libero90",
+        "name": "libero90_subopt_horizon15", #"libero90_horizon15", #"libero90",
         "data_dir": "/home/shivin/tensorflow_datasets/", #,libero_val_selected_demos",
         "image_obs_keys": {"primary": "image", "wrist": "wrist_image"},
         "state_obs_keys": ["state"],

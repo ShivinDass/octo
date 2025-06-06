@@ -15,16 +15,12 @@ from functools import cache
 from scipy.stats import spearmanr, pearsonr
 import json
 
-# from domains.vjp_lm import vjp_lm
-# from domains.vjp_blocks import one_sample_vjp_head, sample_loss_vjp_head, \
-#     example_loss_vjp_skeleton
-
 from octo.utils.jax_utils import initialize_compilation_cache
 
-from make_loader_mds import make_split_loader_and_data_weights, make_replay_dataset
-# from make_loader import make_split_loader_and_data_weights, make_replay_dataset
+from make_metaworld_loader_mds import make_split_loader_and_data_weights, make_replay_dataset
 
-from make_model import make_model
+# from make_model import make_model
+from jax_lm.metaworld.metaworld_model_jax import make_mw_model
 from jax_lm.domains.vjp_robodm import vjp_robodm
 from jax_lm.metagradients.optimizers.adam import make_adam_optimizer
 from jax_lm.metagradients.optimizers.interpolation import interp_from, interp_from_mom
@@ -74,8 +70,7 @@ def make_vjp_skele(bs):
 def per_sample_loss_fn(params,
                        batch,
                        model,
-                       frozen_params,
-                       train,
+                       train=True,
                        data_weights=None,
                        divisor=1.0):
 
@@ -85,55 +80,39 @@ def per_sample_loss_fn(params,
         frozen_params: non-trainable parameters
     """
     assert divisor == 1.0, divisor
-
-    flat_params = flax.traverse_util.flatten_dict(params)
-    flat_frozen_params = flax.traverse_util.flatten_dict(frozen_params)
-
-    all_params = flat_params | flat_frozen_params
-    all_params = flax.traverse_util.unflatten_dict(all_params)
-
-    model = model.replace(params=all_params)
-
     _, (data, _) = batch[:2]
     assert 'seed' in data
 
-    seed = data['seed'][0]
-    rng = jax.random.PRNGKey(seed)
+    # @jax.jit
+    # def loss_fn(params, data):
+    #     policy = model.replace(params=params)
+    #     bound_module = policy.module.bind({"params": params})
+    #     dist = bound_module(data["observation"])
+    #     action_loss = policy.per_sample_loss(dist, data["action"])
 
-    bound_module = model.module.bind({"params": all_params}, rngs={"dropout": rng})
-    transformer_embeddings = bound_module.octo_transformer(
-        data["observation"],
-        data["task"],
-        data["observation"]["pad_mask"],
-        # train=train,
-        train=False,
-    )
-    action_loss, action_metrics = bound_module.heads["action"].per_sample_loss(
-        transformer_embeddings,  # Action head knows to pull out the action readout_key
-        data["action"],
-        pad_mask=data["observation"]["pad_mask"],
-        # train=train,
-        train=False,
-    )
+    #     if data_weights is not None:
+    #         indices = data['index']
+    #         these_data_weights = data_weights[indices]
+    #         action_loss = action_loss * these_data_weights
+    #     return action_loss / divisor
 
-    if 'weights' in data:
-        weights = data['weights']
-        # weights = 2*(weights-1) + 1
-        # jax.debug.print("B: {}", weights)
-        action_loss = action_loss * weights
-    
-    # what is this doing?
+    policy = model.replace(params=params)
+    bound_module = policy.module.bind({"params": params})
+    dist = bound_module(data["observation"])
+    action_loss = policy.per_sample_loss(dist, data["action"])
+
     if data_weights is not None:
         indices = data['index']
         these_data_weights = data_weights[indices]
         action_loss = action_loss * these_data_weights
-
     return action_loss / divisor
+
+    # return loss_fn(params, data)
 
 def data_selection_iter(data_weights: jax.numpy.array,
                         checkpoint_path: str,
                         job_id: int=0):
-
+    
     initialize_compilation_cache()
     devices = jax.devices()
 
@@ -150,53 +129,14 @@ def data_selection_iter(data_weights: jax.numpy.array,
     bob_its = FLAGS.config.bob_steps
     forward_its = train_its - bob_its
 
-    # # special_batch = FLAGS.config.num_steps - FLAGS.config.bob_steps
-    # for batch in train_batcher(0, 5, None):
-    # # for batch in train_batcher(20, 21, None):
-    # # for batch in train_batcher(special_batch, special_batch+1, None):
-    #     for item in batch.get_minibatches('train'):
-    #         bp()
-    #         pass
-
     val_batcher = partial(make_split_loader_and_data_weights, mode='val', seed=FLAGS.config.seed)
-    # val_its = FLAGS.config.num_val_steps
-    # val_its = 1
-
-    if 'book-caddy' in FLAGS.config.folder_name:
-        val_its = 2
-    elif 'bowl-cabinet' in FLAGS.config.folder_name:
-        val_its = 3
-    elif 'mug-mug' in FLAGS.config.folder_name:
-        val_its = 3
-    elif 'moka-moka' in FLAGS.config.folder_name:
-        val_its = 5
-    elif 'cream-butter' in FLAGS.config.folder_name:
-        val_its = 3
-    elif 'soup-sauce' in FLAGS.config.folder_name:
-        val_its = 3
-    elif 'stove-moka' in FLAGS.config.folder_name:
-        val_its = 3
-    elif 'mug-microwave' in FLAGS.config.folder_name:
-        val_its = 4
-        # val_its = 7
-    elif 'soup-cheese' in FLAGS.config.folder_name:
-        val_its = 3
-    else:
-        val_its = 1
-
-    model, frozen_params, trainable_params = make_model(train_batcher)
-
-    num_trainable_params = sum(x.size for x in jax.tree_util.tree_leaves(trainable_params))
-    num_frozen_params = sum(x.size for x in jax.tree_util.tree_leaves(frozen_params))
-    num_total_params = num_trainable_params + num_frozen_params
-
-    print(f'Trainable params: {num_trainable_params:,}')
-    print(f'Frozen params: {num_frozen_params:,}')
-    print(f'Total params: {num_total_params:,}')
-
+    val_its = 1
+    
+    #model, frozen_params, trainable_params = make_model(train_batcher)
+    model = make_mw_model(seed=FLAGS.config.seed, obs_dim=39)
+    
     psl = jax.tree_util.Partial(
         per_sample_loss_fn,
-        frozen_params=frozen_params,
         model=model,
     )
 
@@ -210,7 +150,7 @@ def data_selection_iter(data_weights: jax.numpy.array,
         'pct_start': lr_scheduler_dict['warmup_steps'] / lr_scheduler_dict['decay_steps'],
         'pct_final': 1,
         'b1': 0.9,
-        'b2': 0.95,
+        'b2': 0.99,
         'min_lr_relative': max(lr_scheduler_dict['init_value'], EPS),
         'final_min_lr_relative': max(lr_scheduler_dict['end_value'], EPS),
         'eps': EPS,
@@ -228,7 +168,7 @@ def data_selection_iter(data_weights: jax.numpy.array,
     }
 
     state0 = make_adam_optimizer(
-        initial_params=trainable_params,
+        initial_params=model.params,
         train_its=train_its,
         **OPTIMIZER_KWARGS,
     )
@@ -262,7 +202,7 @@ def data_selection_iter(data_weights: jax.numpy.array,
         aux_datasets=aux_datasets,
         return_state=True,
         forward_only=True,
-        segment_size=25,
+        segment_size=50,
         # forward_only=False,
     )
     import time
@@ -293,30 +233,18 @@ def data_selection_iter(data_weights: jax.numpy.array,
     # merging final params
 
     final_params = final_state.params
-
-    final_params = flax.traverse_util.flatten_dict(final_params)
-    flat_frozen_params = flax.traverse_util.flatten_dict(frozen_params)
-
-    all_params = final_params | flat_frozen_params
-    all_params = flax.traverse_util.unflatten_dict(all_params)
+    all_params = final_params
 
     model = model.replace(params=all_params)
 
     # save model
-    if FLAGS.config.job_id % 5 == 0:
-        model.save_pretrained(step=train_its, checkpoint_path=checkpoint_path)
+    # if FLAGS.config.job_id % 5 == 0:
+    #     model.save_pretrained(step=train_its, checkpoint_path=checkpoint_path)
     # model.load_pretrained(step=train_its, checkpoint_path=checkpoint_path)
 
     import json
     with open(os.path.join(checkpoint_path, 'hparams_config.json'), 'w') as f:
         json.dump(FLAGS.config.to_dict(), f, indent=4)
-
-    # indices = set()
-    # special_batch = FLAGS.config.num_steps - FLAGS.config.bob_steps
-    # for batch in train_batcher(special_batch, special_batch+1, None):
-    #     for item in batch.get_minibatches('train'):
-    #         pass
-            # indices |= set(item[0].tolist())
 
     grad = grad_from_store(deps, batch_indices)
     print(grad)
@@ -454,12 +382,8 @@ def main(_):
 
     job_id = FLAGS.config.job_id
 
-    # formatted_date_time = datetime.now().strftime("%d-%b-%Y_%I-%M-%S%p").lower()
-    # formatted_date_time = 'test_data_selection_fast'
-    # formatted_date_time = 'test_data_selection_slow'
-    # formatted_date_time = 'test_data_selection_slow_more_iters'
     formatted_date_time = FLAGS.config.folder_name
-    meta_checkpoint_path = os.path.join(FLAGS.config.save_dir, FLAGS.config.dataset_kwargs.name, formatted_date_time)
+    meta_checkpoint_path = os.path.join(FLAGS.config.save_dir, formatted_date_time)
 
     checkpoint_path = os.path.join(meta_checkpoint_path, f'iter_{job_id}')
     os.makedirs(checkpoint_path, exist_ok=True)
@@ -479,11 +403,7 @@ def main(_):
 
     else:
         prev_job = job_id - 1
-        # prev_dw_path = os.path.join(meta_checkpoint_path, f'iter_{prev_job}', 'data_weights.npy')
 
-        # data_weights = jnp.array(
-        #     np.load(prev_dw_path)
-        # )
         _, data_weights = make_replay_dataset(0, 1e5, None, train=True, return_dw_only=True)
         data_weights = jax.numpy.concatenate(
             [data_weights, jax.numpy.zeros_like(data_weights)],
@@ -503,25 +423,9 @@ def main(_):
         job_id=job_id,
     )
 
-    candidate_grad = grad[1_000_000:]
-    # order = np.argsort(candidate_grad)
-
-    # candidate_grad[order] is sorted from smallest to largest
-    # negative first and positive later
-    # negative will decrease loss (include)
-    # positive will increase loss (exclude)
-
-    # include_samples = jnp.where(candidate_grad < 0)[0]
-    # exclude_samples = jnp.where(candidate_grad > 0)[0]
-
-    # data_weights = data_weights.at[include_samples].set(1)
-    # data_weights = data_weights.at[exclude_samples].set(0)
-
-    # step_path = os.path.join(checkpoint_path, 'data_weights.npy')
-    # np.save(step_path, np.array(data_weights))
-
-    # create new index for training data
+    # candidate_grad = grad[1_000_000:]
     # create_include_index(candidate_grad)
+
     create_include_index_perc()
     
 if __name__ == '__main__':

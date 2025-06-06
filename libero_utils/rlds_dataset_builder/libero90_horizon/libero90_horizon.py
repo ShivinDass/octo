@@ -143,8 +143,12 @@ class Libero90Horizon(tfds.core.GeneratorBasedBuilder):
 
         def _parse_example(demo, demo_id, traj_ids, task_name):
             # TODO: the lang string needs to be fixed
-            language_instruction = task_name.split('SCENE')[1][2:]
+            split_file = task_name.split('SCENE')[1]
+            language_instruction = split_file[2:] if split_file[2] != '_' else split_file[3:] 
             language_instruction = " ".join(language_instruction.split('_')[:-1])
+            
+            # language_instruction = task_name.split('SCENE')[1][2:]
+            # language_instruction = " ".join(language_instruction.split('_')[:-1])
             print(self.traj_index, language_instruction, '-', demo_id)
 
             # load raw data --> this should change for your dataset

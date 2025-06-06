@@ -46,6 +46,7 @@ columns = {
 
     # 'index': 'ndarray:int64',
     'index': 'int64',
+    # 'weights': 'float32',
 
     'observation.image_primary': 'ndarray:uint8',
     'observation.image_wrist': 'ndarray:uint8',
@@ -150,7 +151,7 @@ def main(_):
 
     out_root = "/mnt/hdd2/libero/mpt_dataset/"
     if do_val:
-        out_root = os.path.join(out_root, 'libero_val_128x128')
+        out_root = os.path.join(out_root, os.path.basename(ds_path) + '_128x128')
 
     out_path = os.path.join(out_root, ds_name)# + '_128x128')
     os.makedirs(out_path, exist_ok=True)

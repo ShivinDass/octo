@@ -2,22 +2,23 @@
 
 set -e
 
-NUM_TRIALS=100
+NUM_TRIALS=30
 
-# FOLDER="book-caddy"
-# FOLDER="bowl-cabinet"
-# FOLDER="mug-mug"
-# FOLDER="moka-moka"
-# FOLDER="cream-butter"
-FOLDER="soup-sauce"
-# FOLDER="stove-moka"
+# FOLDER="book-caddy_weighted_subopt"
+# FOLDER="bowl-cabinet_weighted"
+# FOLDER="mug-mug_weighted"
+# FOLDER="moka-moka_weighted"
+# FOLDER="cream-butter_weighted_subopt"
+FOLDER="soup-sauce_weighted_subopt"
+# FOLDER="stove-moka_weighted"
 # FOLDER="mug-pudding"
-# FOLDER="soup-cheese"
+# FOLDER="soup-cheese_weighted-3"
 # FOLDER="mug-microwave"
 
 # DATASET="libero90_128x128"
-DATASET="libero90_horizon30_128x128"
+# DATASET="libero90_horizon30_128x128"
 # DATASET="libero90_horizon15_128x128"
+DATASET="libero_w15_with_subopt_128x128"
 
 # TASK="study_scene1_pick_up_the_book_and_place_it_in_the_back_compartment_of_the_caddy"
 # TASK="kitchen_scene4_put_the_black_bowl_in_the_bottom_drawer_of_the_cabinet_and_close_it"
@@ -43,8 +44,8 @@ for ((job_id=0; job_id<NUM_TRIALS; job_id++)); do
         --config.folder_name $FOLDER \
         --config.val_dataset_kwargs.name $TASK \
         --config.dataset_kwargs.name $DATASET \
+        --config.candidate_size 0.5 \
         # --config.loss_type "l1" \
-        # --config.candidate_size 0.2 \
         # --config.bob_steps 60 
         # --config.loss_type "l1"
 

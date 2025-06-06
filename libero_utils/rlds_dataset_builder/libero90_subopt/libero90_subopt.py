@@ -6,12 +6,11 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
 import tensorflow_hub as hub
-import cv2
 from tqdm import tqdm
 
 DATA_DIR = '/mnt/hdd2/libero/'
 
-class Libero90(tfds.core.GeneratorBasedBuilder):
+class Libero90Subopt(tfds.core.GeneratorBasedBuilder):
     """DatasetBuilder for example dataset."""
 
     VERSION = tfds.core.Version('0.1.0')
@@ -23,6 +22,7 @@ class Libero90(tfds.core.GeneratorBasedBuilder):
         super().__init__(*args, **kwargs)
         # self._embed = hub.load("https://tfhub.dev/google/universal-sentence-encoder-large/5")
         self.traj_index = 0
+        self.is_suboptimal = False
 
     def _info(self) -> tfds.core.DatasetInfo:
         """Dataset metadata (homepage, citation,...)."""
@@ -88,7 +88,13 @@ class Libero90(tfds.core.GeneratorBasedBuilder):
                         shape=(1,),
                         dtype=np.int32,
                         doc='Index of the trajectory in the dataset.'
-                    )
+                    ),
+                    'is_suboptimal': tfds.features.Tensor(
+                        shape=(1,),
+                        dtype=np.bool_,
+                        doc='True if trajectory is suboptimal, False otherwise.'
+                    ),
+                    
                 }),
                 'episode_metadata': tfds.features.FeaturesDict({
                     'task_name': tfds.features.Text(
@@ -103,7 +109,7 @@ class Libero90(tfds.core.GeneratorBasedBuilder):
     def _split_generators(self, dl_manager: tfds.download.DownloadManager):
         """Define data splits."""
         return {
-            'train': self._generate_examples(source_dir=os.path.join(DATA_DIR, 'libero_90')),
+            'train': self._generate_examples(source_dir=DATA_DIR),
             # 'val': self._generate_examples(path='/home/shivin/foundation_models/data/easy_pick_dataset/data_0_to_39.h5', train=False),
         }
 
@@ -118,7 +124,7 @@ class Libero90(tfds.core.GeneratorBasedBuilder):
 
             # language_instruction = task_name.split('SCENE')[1][2:]
             # language_instruction = " ".join(language_instruction.split('_')[:-1])
-            print(self.traj_index, language_instruction, '-', demo_id)
+            print(self.traj_index, language_instruction, '-', demo_id, self.is_suboptimal)
 
             # load raw data --> this should change for your dataset
             data = demo_data[demo_id]  # this is a list of dicts in our case
@@ -155,6 +161,7 @@ class Libero90(tfds.core.GeneratorBasedBuilder):
                     'language_instruction': language_instruction,
                     # 'language_embedding': language_embedding,
                     'index': np.array([self.traj_index], dtype=np.int32),
+                    'is_suboptimal': np.array([self.is_suboptimal], dtype=np.bool_),
                 })
 
             # cv2.imwrite('im.png', episode[0]['observation']['image'])
@@ -170,17 +177,30 @@ class Libero90(tfds.core.GeneratorBasedBuilder):
             # if you want to skip an example for whatever reason, simply return None
             return self.traj_index, sample
 
-        task_list = sorted(os.listdir(source_dir))
-        for task in task_list:
-            task_name = task.split('.')[0]
-            # create list of all examples
-            f = h5py.File(os.path.join(source_dir, task), 'r')
-            demo_data = f['data']
+        dataset_names = ['libero_90_subopt']
 
-            # for smallish datasets, use single-thread parsing
-            demo_ids = sorted(list(demo_data.keys()))
-            for demo_id in demo_ids:
-                yield _parse_example(demo_id, task_name)
-                self.traj_index += 1
+        for dataset_name in dataset_names:
+            assert os.path.exists(os.path.join(source_dir, dataset_name)), f"Dataset {dataset_name} not found in {source_dir}"
 
-            f.close()
+        for dataset_name in dataset_names:
+            source_dataset_path = os.path.join(source_dir, dataset_name)
+            task_list = sorted(os.listdir(source_dataset_path))
+
+            if dataset_name == 'libero_90_subopt':
+                self.is_suboptimal = True
+            else:
+                self.is_suboptimal = False
+
+            for task in task_list:
+                task_name = task.split('.')[0]
+                # create list of all examples
+                f = h5py.File(os.path.join(source_dataset_path, task), 'r')
+                demo_data = f['data']
+
+                # for smallish datasets, use single-thread parsing
+                demo_ids = sorted(list(demo_data.keys()))
+                for demo_id in demo_ids:
+                    yield _parse_example(demo_id, task_name)
+                    self.traj_index += 1
+
+                f.close()

@@ -6,12 +6,40 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
 import tensorflow_hub as hub
-import cv2
 from tqdm import tqdm
 
+HORIZON=15 # 30 # 15
+MIN_H =8 # 10 # 8
 DATA_DIR = '/mnt/hdd2/libero/'
 
-class Libero90(tfds.core.GeneratorBasedBuilder):
+def chunk_traj(traj, chunk_size):
+    actions = traj['actions'][:]
+    data_size = actions.shape[0]
+
+    for i in range(0, data_size-chunk_size, chunk_size):
+        yield (i, i+chunk_size)
+
+    if i + chunk_size < data_size:
+        # print(data_size-chunk_size, data_size)
+        yield (data_size-chunk_size, data_size)
+
+def get_chunked_idxs(traj, chunk_size):
+    actions = traj['actions'][:]
+    data_size = actions.shape[0]
+
+    total_chunks = 0
+    traj_idxs = np.empty((data_size,), dtype=np.int32)
+    for i in range(0, data_size-chunk_size, chunk_size):
+        traj_idxs[i:i+chunk_size] = total_chunks
+        total_chunks += 1
+
+    if i + chunk_size < data_size:
+        # print(data_size-chunk_size, data_size)
+        traj_idxs[min(i+chunk_size, data_size-MIN_H):] = total_chunks
+        total_chunks += 1
+    return total_chunks, traj_idxs
+
+class Libero90SuboptHorizon(tfds.core.GeneratorBasedBuilder):
     """DatasetBuilder for example dataset."""
 
     VERSION = tfds.core.Version('0.1.0')
@@ -78,6 +106,9 @@ class Libero90(tfds.core.GeneratorBasedBuilder):
                     'language_instruction': tfds.features.Text(
                         doc='Language Instruction.'
                     ),
+                    'task_name': tfds.features.Text(
+                        doc='Task name.'
+                    ),
                     # 'language_embedding': tfds.features.Tensor(
                     #     shape=(512,),
                     #     dtype=np.float32,
@@ -88,7 +119,12 @@ class Libero90(tfds.core.GeneratorBasedBuilder):
                         shape=(1,),
                         dtype=np.int32,
                         doc='Index of the trajectory in the dataset.'
-                    )
+                    ),
+                    'is_suboptimal': tfds.features.Tensor(
+                        shape=(1,),
+                        dtype=np.bool_,
+                        doc='True if trajectory is suboptimal, False otherwise.'
+                    ),
                 }),
                 'episode_metadata': tfds.features.FeaturesDict({
                     'task_name': tfds.features.Text(
@@ -103,39 +139,39 @@ class Libero90(tfds.core.GeneratorBasedBuilder):
     def _split_generators(self, dl_manager: tfds.download.DownloadManager):
         """Define data splits."""
         return {
-            'train': self._generate_examples(source_dir=os.path.join(DATA_DIR, 'libero_90')),
+            'train': self._generate_examples(source_dir=os.path.join(DATA_DIR, 'libero_90_subopt')),
             # 'val': self._generate_examples(path='/home/shivin/foundation_models/data/easy_pick_dataset/data_0_to_39.h5', train=False),
         }
 
     def _generate_examples(self, source_dir) -> Iterator[Tuple[str, Any]]:
         """Generator of examples for each split."""
 
-        def _parse_example(demo_id, task_name):
+        def _parse_example(demo, demo_id, traj_ids, task_name):
             # TODO: the lang string needs to be fixed
             split_file = task_name.split('SCENE')[1]
             language_instruction = split_file[2:] if split_file[2] != '_' else split_file[3:] 
             language_instruction = " ".join(language_instruction.split('_')[:-1])
-
+            
             # language_instruction = task_name.split('SCENE')[1][2:]
             # language_instruction = " ".join(language_instruction.split('_')[:-1])
             print(self.traj_index, language_instruction, '-', demo_id)
 
             # load raw data --> this should change for your dataset
-            data = demo_data[demo_id]  # this is a list of dicts in our case
             
-            actions = data['actions'][:].astype(np.float32)
+            actions = demo['actions'][:].astype(np.float32)
             print(actions.shape)
             actions[:, -1] = (1 - actions[:, -1])/2
             data_len = actions.shape[0]
 
-            primary_image = np.flip(data['obs']['agentview_rgb'][:].astype(np.uint8), axis=1)
-            wrist_image = np.flip(data['obs']['eye_in_hand_rgb'][:].astype(np.uint8), axis=1)
-            ee_pos = data['obs']['ee_pos'][:].astype(np.float32)
-            ee_ori = data['obs']['ee_ori'][:].astype(np.float32)
-            gripper_states = data['obs']['gripper_states'][:][:, :1].astype(np.float32)
+            primary_image = np.flip(demo['obs']['agentview_rgb'][:].astype(np.uint8), axis=1)
+            wrist_image = np.flip(demo['obs']['eye_in_hand_rgb'][:].astype(np.uint8), axis=1)
+            ee_pos = demo['obs']['ee_pos'][:].astype(np.float32)
+            ee_ori = demo['obs']['ee_ori'][:].astype(np.float32)
+            gripper_states = demo['obs']['gripper_states'][:][:, :1].astype(np.float32)
             states = np.concatenate([ee_pos, ee_ori, np.zeros((data_len, 1), dtype=np.float32), gripper_states], axis=-1)
 
             episode = []
+            assert len(traj_ids) == data_len
             # language_embedding = self._embed([language_instruction])[0].numpy()
             for i in range(data_len):
                 # compute Kona language embedding
@@ -154,7 +190,9 @@ class Libero90(tfds.core.GeneratorBasedBuilder):
                     'is_terminal': i == (data_len - 1),
                     'language_instruction': language_instruction,
                     # 'language_embedding': language_embedding,
-                    'index': np.array([self.traj_index], dtype=np.int32),
+                    'index': traj_ids[i:i+1],
+                    'task_name': task_name,
+                    'is_suboptimal': np.array([True], dtype=np.bool_),
                 })
 
             # cv2.imwrite('im.png', episode[0]['observation']['image'])
@@ -180,7 +218,13 @@ class Libero90(tfds.core.GeneratorBasedBuilder):
             # for smallish datasets, use single-thread parsing
             demo_ids = sorted(list(demo_data.keys()))
             for demo_id in demo_ids:
-                yield _parse_example(demo_id, task_name)
-                self.traj_index += 1
+                # slice data into horizon chunks
+                demo = demo_data[demo_id]
+                total_chunks, traj_ids = get_chunked_idxs(demo, HORIZON) 
+                
+                traj_ids += self.traj_index
+                print(traj_ids)
+                yield _parse_example(demo, demo_id, traj_ids, task_name)
+                self.traj_index += total_chunks
 
             f.close()

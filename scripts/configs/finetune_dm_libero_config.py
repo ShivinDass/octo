@@ -33,7 +33,7 @@ def get_config(config_string="full,language_conditioned"):
 
     FINETUNING_VAL_KWARGS = copy.deepcopy(FINETUNING_TRAIN_KWARGS)
     FINETUNING_VAL_KWARGS["name"] = placeholder(str) # target_task_name
-    FINETUNING_VAL_KWARGS["data_dir"] = f"{data_path}/libero_val_128x128/"
+    FINETUNING_VAL_KWARGS["data_dir"] = f"{data_path}/libero_val_first5_128x128/"
 
     if mode == "full":
         frozen_keys = None
@@ -50,7 +50,7 @@ def get_config(config_string="full,language_conditioned"):
     else:
         raise ValueError("Invalid mode")
 
-    max_steps = FieldReference(1000)
+    max_steps = FieldReference(2000)
     window_size = FieldReference(default=1)
 
     config = dict(
