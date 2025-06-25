@@ -222,9 +222,6 @@ def main(_):
             break
         i += 1
 
-    bp()
-    error
-
     #########
     #
     # Load Pretrained Model

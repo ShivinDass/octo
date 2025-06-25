@@ -15,14 +15,9 @@ from functools import cache
 from scipy.stats import spearmanr, pearsonr
 import json
 
-# from domains.vjp_lm import vjp_lm
-# from domains.vjp_blocks import one_sample_vjp_head, sample_loss_vjp_head, \
-#     example_loss_vjp_skeleton
-
 from octo.utils.jax_utils import initialize_compilation_cache
 
 from make_loader_mds import make_split_loader_and_data_weights, make_replay_dataset
-# from make_loader import make_split_loader_and_data_weights, make_replay_dataset
 
 from make_model import make_model
 from jax_lm.domains.vjp_robodm import vjp_robodm
@@ -135,7 +130,6 @@ def data_selection_iter(data_weights: jax.numpy.array,
                         job_id: int=0):
 
     initialize_compilation_cache()
-    devices = jax.devices()
 
     # prevent tensorflow from using GPU memory since it's only used for data loading
     tf.config.set_visible_devices([], "GPU")
@@ -150,17 +144,7 @@ def data_selection_iter(data_weights: jax.numpy.array,
     bob_its = FLAGS.config.bob_steps
     forward_its = train_its - bob_its
 
-    # # special_batch = FLAGS.config.num_steps - FLAGS.config.bob_steps
-    # for batch in train_batcher(0, 5, None):
-    # # for batch in train_batcher(20, 21, None):
-    # # for batch in train_batcher(special_batch, special_batch+1, None):
-    #     for item in batch.get_minibatches('train'):
-    #         bp()
-    #         pass
-
     val_batcher = partial(make_split_loader_and_data_weights, mode='val', seed=FLAGS.config.seed)
-    # val_its = FLAGS.config.num_val_steps
-    # val_its = 1
 
     if 'book-caddy' in FLAGS.config.folder_name:
         val_its = 2
@@ -178,7 +162,6 @@ def data_selection_iter(data_weights: jax.numpy.array,
         val_its = 3
     elif 'mug-microwave' in FLAGS.config.folder_name:
         val_its = 4
-        # val_its = 7
     elif 'soup-cheese' in FLAGS.config.folder_name:
         val_its = 3
     else:
@@ -453,11 +436,7 @@ def create_include_index_perc():
 def main(_):
 
     job_id = FLAGS.config.job_id
-
-    # formatted_date_time = datetime.now().strftime("%d-%b-%Y_%I-%M-%S%p").lower()
-    # formatted_date_time = 'test_data_selection_fast'
-    # formatted_date_time = 'test_data_selection_slow'
-    # formatted_date_time = 'test_data_selection_slow_more_iters'
+    
     formatted_date_time = FLAGS.config.folder_name
     meta_checkpoint_path = os.path.join(FLAGS.config.save_dir, FLAGS.config.dataset_kwargs.name, formatted_date_time)
 
@@ -479,11 +458,6 @@ def main(_):
 
     else:
         prev_job = job_id - 1
-        # prev_dw_path = os.path.join(meta_checkpoint_path, f'iter_{prev_job}', 'data_weights.npy')
-
-        # data_weights = jnp.array(
-        #     np.load(prev_dw_path)
-        # )
         _, data_weights = make_replay_dataset(0, 1e5, None, train=True, return_dw_only=True)
         data_weights = jax.numpy.concatenate(
             [data_weights, jax.numpy.zeros_like(data_weights)],
@@ -503,24 +477,7 @@ def main(_):
         job_id=job_id,
     )
 
-    candidate_grad = grad[1_000_000:]
-    # order = np.argsort(candidate_grad)
-
-    # candidate_grad[order] is sorted from smallest to largest
-    # negative first and positive later
-    # negative will decrease loss (include)
-    # positive will increase loss (exclude)
-
-    # include_samples = jnp.where(candidate_grad < 0)[0]
-    # exclude_samples = jnp.where(candidate_grad > 0)[0]
-
-    # data_weights = data_weights.at[include_samples].set(1)
-    # data_weights = data_weights.at[exclude_samples].set(0)
-
-    # step_path = os.path.join(checkpoint_path, 'data_weights.npy')
-    # np.save(step_path, np.array(data_weights))
-
-    # create new index for training data
+    # candidate_grad = grad[1_000_000:]
     # create_include_index(candidate_grad)
     create_include_index_perc()
     

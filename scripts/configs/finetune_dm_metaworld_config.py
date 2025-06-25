@@ -2,7 +2,7 @@ from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 import copy
 
-def get_config(config_string="full,language_conditioned"):
+def get_config(config_string=""):
 
     data_path = "/home/shivin/libero_experiments/data/mpt_dataset"
     FINETUNING_TRAIN_KWARGS = {
@@ -17,7 +17,6 @@ def get_config(config_string="full,language_conditioned"):
 
     bob_steps = 100
     max_steps = FieldReference(1000 + bob_steps)
-    window_size = FieldReference(default=1)
 
     config = dict(
         loss_type="mse",
@@ -42,7 +41,7 @@ def get_config(config_string="full,language_conditioned"):
         log_interval=100,
         eval_interval=int(max_steps.get()//5),
         save_interval=int(max_steps.get()//5),
-        save_dir=f'/home/shivin/libero_experiments/experiments/metaworld',
+        save_dir=f'/home/shivin/datamil_cleanup/experiments/metaworld',
         seed=42,
         dataset_kwargs=FINETUNING_TRAIN_KWARGS,
         val_dataset_kwargs=FINETUNING_VAL_KWARGS,

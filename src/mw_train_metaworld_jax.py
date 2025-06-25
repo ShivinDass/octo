@@ -15,11 +15,10 @@ from functools import partial
 
 EPS = 1.0000000000000001e-11
 
-@partial(jax.jit, static_argnames=['train', 'divisor'])
+@partial(jax.jit, static_argnames=['divisor'])
 def per_sample_loss_fn(params,
                        batch,
                        model,
-                       train=True,
                        divisor=1.0):
 
     """
@@ -30,15 +29,6 @@ def per_sample_loss_fn(params,
     assert divisor == 1.0, divisor
     data = batch
     
-    # @jax.jit
-    # def loss_fn(params, data):
-    #     policy = model.replace(params=params)
-    #     bound_module = policy.module.bind({"params": params})
-    #     dist = bound_module(data["observation"])
-    #     action_loss = policy.per_sample_loss(dist, data["action"])
-
-    #     return action_loss / divisor
-    
     policy = model.replace(params=params)
     bound_module = policy.module.bind({"params": params})
     dist = bound_module(data["observation"])
@@ -46,11 +36,16 @@ def per_sample_loss_fn(params,
 
     return action_loss / divisor
 
+def eval_every_task(policy, tasks=None):
+    if tasks is None:
+        tasks = ["pick-place-wall"]
+    results = {}
+    for task in tasks:
+        results[task] = eval_metaworld_sim(policy, task=task)
+    return results
 
-    return loss_fn(params, data)
 
-
-max_steps = 1000
+max_steps = 4000
 lr_scheduler_dict = dict(
     name="cosine",
     init_value=0.0001,
@@ -67,7 +62,6 @@ optimizer_dict = dict(
 
 OPTIMIZER_KWARGS = {
         'lr': lr_scheduler_dict['peak_value'],
-        # 'wd': 1e-5,
         'wd': optimizer_dict['weight_decay'],
         'pct_start': lr_scheduler_dict['warmup_steps'] / lr_scheduler_dict['decay_steps'],
         'pct_final': 1,

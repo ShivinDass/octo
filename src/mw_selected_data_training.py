@@ -37,7 +37,7 @@ def per_sample_loss_fn(params,
 
     return action_loss / divisor
 
-max_steps = 2000
+max_steps = 4000
 lr_scheduler_dict = dict(
     name="cosine",
     init_value=0.0001,
@@ -206,7 +206,7 @@ def train_policy(seed):
 
 if __name__ == "__main__":
     results = []
-    for i in range(4,5):
+    for i in range(5):
         results.append(train_policy(seed=i))
     print('mean:', np.mean(results, axis=0))
     print('std:', np.std(results, axis=0))

@@ -1,3 +1,0 @@
-[submodule "gemma"]
-	path = gemma
-	url = git@github.com:lengstrom/gemma.git

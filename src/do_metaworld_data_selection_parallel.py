@@ -83,19 +83,6 @@ def per_sample_loss_fn(params,
     _, (data, _) = batch[:2]
     assert 'seed' in data
 
-    # @jax.jit
-    # def loss_fn(params, data):
-    #     policy = model.replace(params=params)
-    #     bound_module = policy.module.bind({"params": params})
-    #     dist = bound_module(data["observation"])
-    #     action_loss = policy.per_sample_loss(dist, data["action"])
-
-    #     if data_weights is not None:
-    #         indices = data['index']
-    #         these_data_weights = data_weights[indices]
-    #         action_loss = action_loss * these_data_weights
-    #     return action_loss / divisor
-
     policy = model.replace(params=params)
     bound_module = policy.module.bind({"params": params})
     dist = bound_module(data["observation"])
@@ -107,14 +94,11 @@ def per_sample_loss_fn(params,
         action_loss = action_loss * these_data_weights
     return action_loss / divisor
 
-    # return loss_fn(params, data)
-
 def data_selection_iter(data_weights: jax.numpy.array,
                         checkpoint_path: str,
                         job_id: int=0):
     
     initialize_compilation_cache()
-    devices = jax.devices()
 
     # prevent tensorflow from using GPU memory since it's only used for data loading
     tf.config.set_visible_devices([], "GPU")
@@ -179,7 +163,6 @@ def data_selection_iter(data_weights: jax.numpy.array,
     sharding, replicated_sharding = make_shardings()
     head_val_batcher = jax.tree_util.Partial(val_batcher, sharding=sharding)
 
-    # vjp_skele = jax.tree_util.Partial(partial(example_loss_vjp_skeleton, bs=FLAGS.config.batch_size))
     vjp_skele = make_vjp_skele
     vjp_head = partial(
         sample_loss_vjp_head,
@@ -425,7 +408,6 @@ def main(_):
 
     # candidate_grad = grad[1_000_000:]
     # create_include_index(candidate_grad)
-
     create_include_index_perc()
     
 if __name__ == '__main__':
